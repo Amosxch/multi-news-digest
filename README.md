@@ -1,3 +1,21 @@
-# multi-news-digest
+# 多领域新闻推送
 
-多领域新闻推送（GitHub Pages）
+静态网页：自定义新闻时间范围，手动点击「推送新闻」，按 AI / 国家政策 / 新能源输出简报。
+
+## 本地预览
+
+直接用浏览器打开 `index.html`，或：
+
+```bash
+python3 -m http.server 8080
+```
+
+## GitHub Pages
+
+1. 仓库 Settings → Pages → Source 选 **GitHub Actions**
+2. 推送到 `main` 后自动部署
+3. 站点地址：`https://<user>.github.io/<repo>/`
+
+## 更新数据
+
+编辑 `data/news.json` 后推送即可；页面上点「推送新闻」会按所选日期过滤并渲染。

@@ -1,0 +1,96 @@
+
+:root {
+  --bg: #0b1020;
+  --card: #141b2d;
+  --card-hover: #1a2338;
+  --text: #e8eefc;
+  --muted: #9aa8c7;
+  --line: #243049;
+  --ai: #7c9cff;
+  --policy: #5ddea8;
+  --energy: #ffb86b;
+  --bull: #3dd68c;
+  --bear: #ff6b7a;
+  --neutral: #c9b8ff;
+  --accent: #6ea8fe;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background: radial-gradient(1200px 600px at 10% -10%, #1a2748 0%, transparent 55%),
+              radial-gradient(900px 500px at 100% 0%, #24301f 0%, transparent 50%),
+              var(--bg);
+  color: var(--text);
+  line-height: 1.55;
+  min-height: 100vh;
+}
+.wrap { max-width: 920px; margin: 0 auto; padding: 28px 18px 64px; }
+header { margin-bottom: 18px; }
+.eyebrow { font-size: 12px; letter-spacing: .08em; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; }
+h1 { font-size: clamp(1.5rem, 4vw, 2rem); margin: 0 0 8px; }
+.sub { color: var(--muted); font-size: 14px; margin: 0; }
+.panel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+  margin: 18px 0 22px;
+  display: grid;
+  gap: 14px;
+}
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.field { display: grid; gap: 6px; min-width: 140px; }
+.field label { font-size: 12px; color: var(--muted); }
+.field input[type="date"], .field select {
+  background: #0f1526; color: var(--text); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 12px; font: inherit;
+}
+.presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.presets button, .domains label {
+  border: 1px solid var(--line); background: rgba(255,255,255,.03);
+  color: var(--text); border-radius: 999px; padding: 7px 12px; font: inherit; cursor: pointer;
+}
+.presets button.active, .domains label:has(input:checked) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: rgba(110,168,254,.12); color: #d7e6ff;
+}
+.domains { display: flex; flex-wrap: wrap; gap: 8px; }
+.domains input { accent-color: var(--accent); }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.btn {
+  appearance: none; border: 0; border-radius: 12px; padding: 11px 18px;
+  font: inherit; font-weight: 700; cursor: pointer;
+}
+.btn-primary { background: linear-gradient(135deg, #6ea8fe, #8b7cff); color: #0b1020; }
+.btn-primary:disabled { opacity: .55; cursor: wait; }
+.btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+.status { font-size: 13px; color: var(--muted); }
+.status.error { color: #ff8f9a; }
+.sec { margin-top: 22px; scroll-margin-top: 20px; }
+.sec-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; margin-bottom: 10px; }
+.sec-head h2 { margin: 0; font-size: 1.15rem; }
+.sec-head h2.ai { color: var(--ai); }
+.sec-head h2.policy { color: var(--policy); }
+.sec-head h2.energy { color: var(--energy); }
+.count { color: var(--muted); font-size: 13px; }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 14px 16px; margin-bottom: 10px;
+}
+.card:hover { background: var(--card-hover); }
+.title { display: block; color: var(--text); text-decoration: none; font-weight: 650; margin-bottom: 8px; }
+.title:hover { text-decoration: underline; text-underline-offset: 3px; }
+.meta { display: grid; gap: 5px; font-size: 13.5px; color: var(--muted); }
+.meta strong { color: #c5d0ea; font-weight: 600; }
+.badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; margin-right: 6px; }
+.badge.bull { background: rgba(61,214,140,.15); color: var(--bull); }
+.badge.bear { background: rgba(255,107,122,.15); color: var(--bear); }
+.badge.neutral { background: rgba(201,184,255,.15); color: var(--neutral); }
+.empty {
+  border: 1px dashed var(--line); border-radius: 12px; padding: 18px; color: var(--muted); text-align: center;
+}
+footer { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+@media (max-width: 640px) {
+  .field { width: 100%; }
+}

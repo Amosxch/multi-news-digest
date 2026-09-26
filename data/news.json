@@ -1,0 +1,156 @@
+{
+  "updated_at": "2026-09-26T17:00:00+08:00",
+  "timezone": "Asia/Shanghai",
+  "items": [
+    {
+      "domain": "ai",
+      "title": "【数智周报】千问办公发企业级Agent基建；谷歌推Gemini TTS；Anthropic诉特朗普政府受挫",
+      "summary": "汇总9.21–9.26企业级AI动态，含亚马逊接入Kimi K3等",
+      "date": "2026-09-26",
+      "url": "https://www.tmtpost.com/8153052.html",
+      "source": "钛媒体AGI",
+      "sentiment": "利好",
+      "analysis": "企业侧Agent与云分发进展密，商业化叙事强化"
+    },
+    {
+      "domain": "ai",
+      "title": "Edge AI Daily 早报（9月25日）",
+      "summary": "Anthropic Agent发现新酶；Meta Muse拉升市值；OpenAI Agent涉澳政府系统",
+      "date": "2026-09-25",
+      "url": "https://www.tmtpost.com/8152365.html",
+      "source": "钛媒体AGI",
+      "sentiment": "中性",
+      "analysis": "科学突破与安全事故并存，监管合规压力上升"
+    },
+    {
+      "domain": "ai",
+      "title": "企业数据太多，AI知道得太少：千问办公的上下文生意",
+      "summary": "云栖大会详解企业上下文：渐进暴露+图库，帮Agent取用知识",
+      "date": "2026-09-23",
+      "url": "https://www.tmtpost.com/8151019.html",
+      "source": "钛媒体AGI",
+      "sentiment": "利好",
+      "analysis": "上下文做成基建，利好企业Agent与阿里办公生态"
+    },
+    {
+      "domain": "ai",
+      "title": "Kimi K3.1十月或压轴登场：三档推理、百万上下文",
+      "summary": "内部接口泄露，传10月发，含三档推理与多智能体模式",
+      "date": "2026-09-24",
+      "url": "https://news.aibase.com/zh/news/31348",
+      "source": "Aibase基地",
+      "sentiment": "中性",
+      "analysis": "未官宣爆料，催化情绪但兑现与档期仍不确定"
+    },
+    {
+      "domain": "ai",
+      "title": "腾讯混元推出「腾讯 Hy 翻译」App：33语互译",
+      "summary": "9月24日上线，基于Hy-MT2，支持语音拍照与离线翻译",
+      "date": "2026-09-24",
+      "url": "https://news.aibase.com/zh/news/31354",
+      "source": "Aibase基地",
+      "sentiment": "利好",
+      "analysis": "开源模型产品化，补强混元C端与跨境入口"
+    },
+    {
+      "domain": "policy",
+      "title": "中华人民共和国审计法实施条例（国令第847号）",
+      "summary": "修订后条例公布，自2026-12-01施行，强化监督与整改",
+      "date": "2026-09-24",
+      "url": "https://www.gov.cn/zhengce/content/202609/content_7081972.htm",
+      "source": "中国政府网",
+      "sentiment": "中性",
+      "analysis": "审计法治完善，对财政资金使用约束趋严"
+    },
+    {
+      "domain": "policy",
+      "title": "国办印发「高效办成一件事」2026年第二批重点事项清单",
+      "summary": "拓展适用领域，提升经营主体与个人办事体验",
+      "date": "2026-09-23",
+      "url": "https://www.gov.cn/zhengce/content/202609/content_7081880.htm",
+      "source": "中国政府网",
+      "sentiment": "利好",
+      "analysis": "政务再提速，利好营商环境与统一大市场落地"
+    },
+    {
+      "domain": "policy",
+      "title": "中办、国办印发《关于分类推进高校改革的意见》",
+      "summary": "优化高校分类布局，健全分类管理评价与资源配置激励",
+      "date": "2026-09-20",
+      "url": "https://www.gov.cn/zhengce/202609/content_7081586.htm",
+      "source": "中国政府网",
+      "sentiment": "中性",
+      "analysis": "高教结构性改革，影响中长期人才与学科布局"
+    },
+    {
+      "domain": "policy",
+      "title": "「十五五」民政事业有这些重点（国新办发布会）",
+      "summary": "强调照护扩容、社会救助精准、儿童福利与阳光慈善等",
+      "date": "2026-09-24",
+      "url": "https://www.gov.cn/zhengce/202609/content_7081959.htm",
+      "source": "中国政府网",
+      "sentiment": "利好",
+      "analysis": "养老护理与救助体系建设，利好相关服务供给"
+    },
+    {
+      "domain": "policy",
+      "title": "《出版业发展「十五五」规划》答记者问",
+      "summary": "聚焦主题出版、优质供给、全民阅读与数智化转型",
+      "date": "2026-09-21",
+      "url": "https://www.gov.cn/zhengce/202609/content_7081651.htm",
+      "source": "中国政府网",
+      "sentiment": "中性",
+      "analysis": "出版数字化导向明确，产业重构与监管并行"
+    },
+    {
+      "domain": "energy",
+      "title": "亿纬锂能与 Fluence 签 206GWh 框架，确定性约 16GWh",
+      "summary": "2027–2031年框架大单，确定承诺仅16GWh，余为预留",
+      "date": "2026-09-20",
+      "url": "https://eu.36kr.com/zh/p/3991083876374408",
+      "source": "36氪",
+      "sentiment": "中性",
+      "analysis": "出海叙事强，兑现看AIDC需求与海外产能爬坡"
+    },
+    {
+      "domain": "energy",
+      "title": "世界最大盐穴压缩空气储能项目机组启动",
+      "summary": "江苏金坛二期2号机组启动，规划两套350MW，效率超70%",
+      "date": "2026-09-20",
+      "url": "https://www.escn.com.cn/news/show-2272230.html",
+      "source": "中国储能网",
+      "sentiment": "利好",
+      "analysis": "长时压缩空气储能工程化突破，支撑新能源消纳"
+    },
+    {
+      "domain": "energy",
+      "title": "南网储能文山丘北宝池站 200MW/400MWh 服务消纳",
+      "summary": "国内首座大型锂钠混合储能站，累计调节电量破5亿千瓦时",
+      "date": "2026-09-20",
+      "url": "https://www.escn.com.cn/news/show-2272245.html",
+      "source": "中国储能网",
+      "sentiment": "利好",
+      "analysis": "构网型与多技术路线示范，强化区域电网调节"
+    },
+    {
+      "domain": "energy",
+      "title": "莞穗锂电池海运出口「一箱制」启动",
+      "summary": "海关海事危包证数据互认，减少重复申报，压缩放行时长",
+      "date": "2026-09-24",
+      "url": "https://www.chinanews.com.cn/cj/2026/09-24/10702705.shtml",
+      "source": "北极星储能网",
+      "sentiment": "利好",
+      "analysis": "出口通关提效，利好锂电出海与口岸营商环境"
+    },
+    {
+      "domain": "energy",
+      "title": "超高镍全固态电池成果发布，两项核心技术突破",
+      "summary": "能量密度破400Wh/kg，循环超800次（川大团队）",
+      "date": "2026-09-24",
+      "url": "https://www.scu.edu.cn/info/1207/40655.htm",
+      "source": "北极星储能网",
+      "sentiment": "利好",
+      "analysis": "固态材料突破，产业化仍处验证与转化阶段"
+    }
+  ]
+}

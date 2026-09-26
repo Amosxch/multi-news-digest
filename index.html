@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>多领域新闻推送</title>
+  <meta name="description" content="自定义时间范围，手动推送 AI / 国家政策 / 新能源简报" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="eyebrow">Multi-domain News Push</div>
+      <h1>多领域新闻推送</h1>
+      <p class="sub">自选时间范围与领域，点击「推送新闻」生成可分享简报（标题可点进原文）</p>
+    </header>
+
+    <div class="panel">
+      <div>
+        <div class="field" style="margin-bottom:8px"><label>快捷时间</label></div>
+        <div class="presets">
+          <button type="button" data-days="3">近 3 天</button>
+          <button type="button" data-days="7" class="active">近 7 天</button>
+          <button type="button" data-days="14">近 14 天</button>
+          <button type="button" data-days="30">近 30 天</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="startDate">开始日期</label>
+          <input id="startDate" type="date" />
+        </div>
+        <div class="field">
+          <label for="endDate">结束日期</label>
+          <input id="endDate" type="date" />
+        </div>
+      </div>
+
+      <div>
+        <div class="field" style="margin-bottom:8px"><label>新闻领域</label></div>
+        <div class="domains">
+          <label><input type="checkbox" value="ai" checked /> AI新闻</label>
+          <label><input type="checkbox" value="policy" checked /> 国家政策</label>
+          <label><input type="checkbox" value="energy" checked /> 新能源</label>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="pushBtn" class="btn btn-primary" type="button">推送新闻</button>
+        <button id="resetBtn" class="btn btn-ghost" type="button">重置</button>
+        <span id="status" class="status">选好时间后点「推送新闻」</span>
+      </div>
+    </div>
+
+    <div id="results"></div>
+
+    <footer>
+      数据来自约定来源的精选条目 · 单页静态站，可部署于 GitHub Pages · 排除广告 / 水文 / 娱乐八卦
+    </footer>
+  </div>
+  <script src="./app.js"></script>
+</body>
+</html>
