@@ -1,0 +1,27 @@
+name = "cf-news-worker"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+account_id = "01b7be1a9b0cb840f69f148d07d2eb94"
+workers_dev = true
+
+[[kv_namespaces]]
+binding = "NEWS_KV"
+id = "01c19b337c0f410993c1ed52bee20d6b"
+
+[ai]
+binding = "AI"
+
+[vars]
+ALLOWED_ORIGINS = "https://amosxch.github.io"
+AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
+# Optional OpenAI-compatible override (used only when secret LLM_API_KEY is set):
+LLM_BASE_URL = "https://api.deepseek.com/v1"
+LLM_MODEL = "deepseek-chat"
+STATIC_JSON_URL = "https://amosxch.github.io/multi-news-digest/data/news.json"
+SUBREQUEST_BUDGET = "46"      # Free plan: 50 subrequests / invocation
+SOURCE_DEADLINE_MS = "22000"
+FETCH_TIMEOUT_MS = "9000"
+LLM_TIMEOUT_MS = "25000"
+DEFAULT_LIMIT = "5"
+MAX_RANGE_DAYS = "92"
+DEBUG = "0"
