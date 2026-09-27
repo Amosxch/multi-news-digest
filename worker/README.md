@@ -2,6 +2,8 @@
 
 `GET /api/news?start=YYYY-MM-DD&end=YYYY-MM-DD&domains=ai,policy,energy[&limit=5][&fresh=1][&probe=1]`
 
+`GET /api/ping` → `{ok, time, colo, country}` (no subrequests; the frontend calls it on load to show whether the visitor's network reaches workers.dev)
+
 Live: **https://cf-news-worker.amosxch.workers.dev**  (e.g. `/api/news?start=2026-08-01&end=2026-08-05&domains=ai`)
 
 For each requested domain the worker fetches every source in parallel (own sub-budget per source,
@@ -23,7 +25,7 @@ Item schema matches `data/news.json` of the static site, so the frontend merges 
 | Domain | Source | Method | Reach back |
 |---|---|---|---|
 | AI | 钛媒体AGI | `api.tmtpost.com/v1/categories/multi_content/list?category_guid=6916385&offset&limit=50` (public web-client headers from the site's JS) — random access → interpolation search | whole column (6.5k posts, years) |
-| AI | AIbase | list JSON API needs login (401); list HTML = newest 20 only. Article ids are sequential (~27/day) and each `/zh/news/{id}` embeds `__NUXT_DATA__` (title/description/createTime/pv) → interpolation search on id, then evenly sample ids in range | any date (tested 2025-07) |
+| AI | Aibase基地 | list JSON API needs login (401); list HTML = newest 20 only. Article ids are sequential (~27/day) and each `/zh/news/{id}` embeds `__NUXT_DATA__` (title/description/createTime/pv) → id↔date calibration anchors + 2 refinement probes, then ~10 evenly sampled ids in range (budget 18) | any date (tested 2025-07, 2026-03) |
 | 政策 | 中国政府网 | `https://www.gov.cn/zhengce/zuixin/ZUIXINZHENGCE.json` (1100 items) | 2020-01 → today, 1 request |
 | 政策 | 财政部 | `zhengcefabu/index.htm`, `index_1.htm` … (20 pages) | ~2023; page 0 ≈ Jul→Sep 2026 |
 | 政策 | 发改委 | `xxgk/zcfb/tz/index.html`, `index_N.html` | ~2025; page 0 ≈ May→Sep 2026 |
@@ -77,4 +79,4 @@ Local: `npx wrangler dev` (AI binding always runs remotely and needs login), or 
 * `src/sources/{ai,policy,energy}.js` one fetcher per site; `src/sources/index.js` registry
 * `src/rank.js` heuristic scoring (domain keywords, source weight, ad/fluff/patent-filler penalties) + diversity
 * `src/llm.js` Workers AI / OpenAI-compatible call, JSON extraction, validation
-* `frontend.patch` diff of the static site (app.js / styles.css / index.html)
+* `frontend.patch` first frontend diff; `frontend-v3.patch` diff vs. live commit 4759c21 (per-domain loading, ping, version check)

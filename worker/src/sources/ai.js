@@ -1,4 +1,4 @@
-import { fetchJson, fetchText, msToYmd, pagedSearch, inRange, stripTags } from '../util.js';
+import { fetchJson, fetchText, msToYmd, pagedSearch, inRange, stripTags, dayNum } from '../util.js';
 
 // ---------- 钛媒体 AGI (column 6916385) ----------
 // Public JSON API used by the tmtpost.com web front-end (api.tmtpost.com). It needs the
@@ -67,47 +67,95 @@ function nuxtArticles(arr) {
   }
   return out;
 }
+// Known (id, date) calibration points; the live newest id from the list page is added at runtime.
+const AIBASE_ANCHORS = [
+  [20000, '2025-07-28'],
+  [24000, '2025-12-25'],
+  [27500, '2026-04-27'],
+  [29000, '2026-06-18'],
+  [30500, '2026-08-20'],
+];
+const AIBASE_RATE = 27; // ids per day (approx.)
+
 export const aibase = {
   id: 'aibase',
   name: 'Aibase基地',
   domain: 'ai',
-  budget: 14,
+  budget: 18,
   async fetch(ctx, start, end) {
     const list = await fetchText(ctx, 'https://news.aibase.com/zh/news');
     if (!list.ok) throw new Error(`list HTTP ${list.status}`);
     const listArts = nuxtArticles(parseNuxt(list.text)).filter((a) => a.oid && a.createTime);
-    const ids = [...list.text.matchAll(/href="\/zh\/news\/(\d+)"/g)].map((m) => Number(m[1]));
-    const newest = Math.max(...ids, ...listArts.map((a) => Number(a.oid)));
-    if (!Number.isFinite(newest)) throw new Error('cannot find newest article id');
-    const items = listArts.map((a) => ({
+    const toItem = (a, id) => ({
       title: stripTags(a.title),
-      url: `https://news.aibase.com/zh/news/${a.oid}`,
+      url: `https://news.aibase.com/zh/news/${id}`,
       date: String(a.createTime).slice(0, 10),
       desc: stripTags(a.desc),
       pv: Number(a.pv) || 0,
       source: 'Aibase基地',
-    }));
-    const STRIDE = 1;
-    const detail = async (id) => {
-      for (let k = 0; k < 2; k++) {
-        const r = await fetchText(ctx, `https://news.aibase.com/zh/news/${id - k}`);
-        if (r.status === 404) continue; // daily-report ids etc.
-        const a = nuxtArticles(parseNuxt(r.text))[0];
-        if (a && a.createTime)
-          return [{ title: stripTags(a.title), url: `https://news.aibase.com/zh/news/${id - k}`, date: String(a.createTime).slice(0, 10), desc: stripTags(a.desc), pv: Number(a.pv) || 0, source: 'Aibase基地' }];
-      }
-      return [];
-    };
-    // "page" 0 = list page, page i = article id newest - i*STRIDE
-    const r = await pagedSearch({
-      start,
-      end,
-      maxProbes: 6,
-      maxRangePages: 6,
-      maxPage: newest - 1,
-      initialDpp: 1 / 27,
-      fetchPage: async (i) => (i === 0 ? items : detail(newest - i * STRIDE)),
     });
-    return r;
+    const found = new Map(); // id -> item
+    for (const a of listArts) found.set(Number(a.oid), toItem(a, a.oid));
+    const newest = Math.max(...[...list.text.matchAll(/href="\/zh\/news\/(\d+)"/g)].map((m) => Number(m[1])), ...found.keys());
+    if (!Number.isFinite(newest)) throw new Error('cannot find newest article id');
+
+    // anchors as [id, dayNum]
+    const anchors = AIBASE_ANCHORS.map(([id, d]) => [id, dayNum(d)]);
+    for (const [id, it] of found) anchors.push([id, dayNum(it.date)]);
+    const idAt = (day) => {
+      const pts = [...anchors].sort((a, b) => a[0] - b[0]);
+      // piecewise-linear interpolation on (day -> id); extrapolate with AIBASE_RATE
+      if (day <= pts[0][1]) return Math.round(pts[0][0] - (pts[0][1] - day) * AIBASE_RATE);
+      for (let i = 1; i < pts.length; i++) {
+        const [i0, d0] = pts[i - 1];
+        const [i1, d1] = pts[i];
+        if (day <= d1) return d1 === d0 ? i1 : Math.round(i0 + ((day - d0) / (d1 - d0)) * (i1 - i0));
+      }
+      const [il, dl] = pts[pts.length - 1];
+      return Math.round(il + (day - dl) * AIBASE_RATE);
+    };
+    // fetch one article; daily-report ids 404 -> step down to the neighbour
+    const probe = async (id) => {
+      for (let k = 0; k < 3; k++) {
+        const cur = id - k;
+        if (cur < 1 || cur > newest) return null;
+        if (found.has(cur)) return found.get(cur);
+        if (ctx.remaining() < 1) return null;
+        const r = await fetchText(ctx, `https://news.aibase.com/zh/news/${cur}`);
+        if (r.status === 404) continue;
+        const a = nuxtArticles(parseNuxt(r.text))[0];
+        if (a && a.createTime) {
+          const it = toItem(a, cur);
+          found.set(cur, it);
+          anchors.push([cur, dayNum(it.date)]);
+          return it;
+        }
+      }
+      return null;
+    };
+    const S = dayNum(start);
+    const E = dayNum(end);
+    let lo = Math.max(1, idAt(S - 0.1));
+    let hi = Math.min(newest, idAt(E + 1) - 1);
+    let note = '';
+    if (hi < lo) return { items: [], note: 'range after newest article' };
+    // two refinement rounds: probe both ends in parallel, re-interpolate with the new anchors
+    for (let round = 0; round < 2; round++) {
+      const [pl, ph] = await Promise.all([probe(lo), hi > lo ? probe(hi) : null]);
+      const okLo = !pl || (dayNum(pl.date) < S && dayNum(pl.date) >= S - 1) || (lo === 1);
+      const okHi = !ph || hi === newest || (dayNum(ph.date) <= E && dayNum(ph.date) >= E - 1);
+      if (okLo && okHi) break;
+      lo = Math.max(1, idAt(S - 0.1));
+      hi = Math.min(newest, idAt(E + 1) - 1);
+      if (hi < lo) break;
+    }
+    // evenly sample the id range with the remaining budget (each sample ~1.1 requests)
+    const k = Math.max(0, Math.min(10, Math.floor((ctx.remaining() - 1) / 1.15)));
+    const ids = new Set();
+    for (let i = 0; i < k; i++) ids.add(Math.round(lo + ((i + 0.5) * (hi - lo)) / Math.max(1, k)));
+    await Promise.allSettled([...ids].filter((id) => !found.has(id)).map((id) => probe(id)));
+    note = `ids ${lo}..${hi}, sampled ${ids.size}`;
+    const items = [...found.values()].filter((x) => inRange(x.date, start, end));
+    return { items, note };
   },
 };

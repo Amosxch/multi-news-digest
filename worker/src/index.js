@@ -3,7 +3,7 @@ import { Ctx, BudgetError, dayNum, dayStr, isYmd, todayCst } from './util.js';
 import { selectCandidates } from './rank.js';
 import { analyze } from './llm.js';
 
-const VERSION = 'v2';
+const VERSION = 'v3';
 const DOMAINS = ['ai', 'policy', 'energy'];
 const BLOCKED = new Set(['bjx', 'inen', 'ggii']); // anti-bot / broken TLS from datacenter IPs
 
@@ -190,7 +190,7 @@ async function buildDomain(env, ctx, domain, start, end, opts) {
 
   const healthy = g.statuses.every((s) => ['ok', 'blocked', 'cached'].includes(s.status)) && llm.analyzed;
   const past = end < today;
-  const ttl = past ? (healthy ? 30 * 86400 : 3 * 3600) : 30 * 60;
+  const ttl = past ? (healthy ? 30 * 86400 : 20 * 60) : 20 * 60;
   if (items.length) opts.waitUntil(kvPut(env, resKey, { ...result, cachedAt: new Date().toISOString() }, ttl));
   return { ...result, cache: 'miss' };
 }
@@ -249,6 +249,8 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(req, env) });
     if (req.method !== 'GET') return json(req, env, { error: 'method not allowed' }, 405);
     try {
+      if (u.pathname === '/api/ping')
+        return json(req, env, { ok: true, time: new Date().toISOString(), colo: (req.cf && req.cf.colo) || null, country: (req.cf && req.cf.country) || null }, 200, { 'Cache-Control': 'no-store' });
       if (u.pathname === '/api/news') return await handleNews(req, env, ectx);
       if (u.pathname === '/api/sources')
         return json(req, env, Object.fromEntries(Object.entries(SOURCES).map(([d, l]) => [d, l.map((s) => ({ id: s.id, name: s.name, blocked: BLOCKED.has(s.id) }))])));

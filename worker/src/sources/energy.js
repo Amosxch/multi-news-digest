@@ -45,11 +45,15 @@ export const kr36 = {
   async fetch(ctx, start, end) {
     const all = [];
     const notes = [];
-    const perWord = Math.floor(ctx.budget / KR_WORDS.length);
+    // results are newest-first with no date filter: for older ranges spend the whole budget on one keyword
+    const ageDays = (Date.now() - Date.parse(start + 'T00:00:00+08:00')) / 86400000;
+    const words = ageDays > 35 ? KR_WORDS.slice(0, 1) : KR_WORDS;
+    const perWord = Math.floor(ctx.budget / words.length);
     const settled = await Promise.allSettled(
-      KR_WORDS.map(async (word) => {
+      words.map(async (word) => {
         let cb = null;
         let pages = 0;
+        let reached = false;
         while (pages < perWord) {
           const param = { searchType: 'article', searchWord: word, sort: 'date', pageSize: 200, pageEvent: cb ? 1 : 0, siteId: 1, platformId: 2 };
           if (cb) param.pageCallback = cb;
@@ -81,14 +85,15 @@ export const kr36 = {
               source: '36氪',
             });
           }
-          if (oldest < start || !d.hasNextPage || !d.pageCallback) break;
+          if (oldest < start || !d.hasNextPage || !d.pageCallback) { reached = true; break; }
           cb = d.pageCallback;
         }
+        if (!reached) notes.push(`${word}: search results did not reach ${start}`);
         notes.push(`${word}:${pages}p`);
       })
     );
     const errs = settled.filter((x) => x.status === 'rejected').map((x) => x.reason.message);
-    if (errs.length === KR_WORDS.length) throw new Error(errs[0]);
+    if (errs.length === words.length) throw new Error(errs[0]);
     if (errs.length) notes.push('partial: ' + errs[0].slice(0, 60));
     const seen = new Set();
     const items = all.filter((x) => (seen.has(x.url) ? false : (seen.add(x.url), true)));
