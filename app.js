@@ -15,7 +15,7 @@ const MAX_PER_DOMAIN = 10;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // 实时抓取服务（Cloudflare Worker）。设为 '' 可关闭实时抓取，仅用 data/news.json
-const APP_VERSION = '20260929g'; // 与 version.json / index.html 中的 ?v= 保持一致
+const APP_VERSION = '20260929h'; // 与 version.json / index.html 中的 ?v= 保持一致
 const WORKER_URL = 'https://cf-news-worker.amosxch.workers.dev';
 const WORKER_TIMEOUT_MS = 90000; // 冷启动 + 多站抓取 + AI 分析，最长约 30~60 秒
 const LIVE_CHUNK_DAYS = 31;      // 超出覆盖的区间按 31 天分段请求（每段每领域约 5 条）
@@ -438,6 +438,7 @@ async function pushNews() {
     if (!domains.length) throw new Error('请至少选择一个新闻领域');
     const newsDomains = domains.filter((d) => d !== 'custom');
     const wantCustom = customActiveSources(domains).length > 0;
+    const skippedSrc = skippedInvalidCount(domains);
 
     let index = null;
     let staticErr = null;
@@ -457,7 +458,7 @@ async function pushNews() {
     const tail = WORKER_URL && newsDomains.length && end >= tailA && !must.some(([a, b]) => a <= tailA && b >= end) ? [[tailA, end]] : [];
     const mustCover = (a, b) => must.some(([x, y]) => x <= a && y >= b);
     const segs = [...must, ...tail.filter(([a, b]) => !mustCover(a, b))];
-    const meta = { start, end, cov, updated_at: index ? index.updated_at || '' : '', domains, t0: performance.now(), static: true, custom: { state: 'none' } };
+    const meta = { start, end, cov, updated_at: index ? index.updated_at || '' : '', domains, t0: performance.now(), static: true, custom: { state: 'none' }, skipped: skippedSrc };
     const liveItems = [];
     const customItems = [];
     const draw = () => { if (seq === pushSeq) render(mergeItems(customItems, mergeItems(staticItems, liveItems)), meta); };
@@ -594,7 +595,10 @@ function bind() {
     $('#pushBtn').disabled = false;
     $('#status').textContent = '已重置，点击「推送新闻」生成简报';
   });
-  initSettings();
+  try { initSettings(); } catch (e) {
+    console.error('initSettings failed', e);
+    const m = $('#srcMsg'); if (m) { m.textContent = '来源设置初始化失败：' + (e && e.message ? e.message : e) + '（请强制刷新页面，或清除本站数据后重试）'; m.classList.add('error'); }
+  }
   showCoverageHint();
   pingPromise = pingWorker();
   checkVersion();
@@ -651,25 +655,27 @@ async function checkVersion() {
 let sourcesStore = [];
 
 function loadSources() {
-  try {
-    const arr = JSON.parse(localStorage.getItem(SRC_STORE) || '[]');
-    if (!Array.isArray(arr)) return [];
-    return arr
-      .filter((x) => x && (x.type === 'web' || x.type === 'wechat') && typeof x.name === 'string')
-      .slice(0, MAX_CUSTOM_SOURCES)
-      .map((x) => ({
-        id: String(x.id || uid()),
-        type: x.type,
-        name: String(x.name).slice(0, 30),
-        url: typeof x.url === 'string' ? x.url : '',
-        links: Array.isArray(x.links) ? x.links.filter((l) => typeof l === 'string').slice(0, 10) : [],
-        keyword: typeof x.keyword === 'string' ? x.keyword.slice(0, 80) : '',
-        domain: ['ai', 'policy', 'energy', 'custom'].includes(x.domain) ? x.domain : 'custom',
-        enabled: x.enabled !== false,
-      }));
-  } catch (_) {
-    return [];
+  let arr = [];
+  try { arr = JSON.parse(localStorage.getItem(SRC_STORE) || '[]'); } catch (_) { arr = []; }
+  if (!Array.isArray(arr)) return [];
+  const out = [];
+  for (const x of arr) {
+    if (!x || typeof x !== 'object' || (x.type !== 'web' && x.type !== 'wechat')) continue;
+    const links = Array.isArray(x.links) ? x.links.filter((l) => typeof l === 'string') : [];
+    out.push({
+      id: String(x.id || uid()),
+      type: x.type,
+      name: typeof x.name === 'string' ? x.name.slice(0, 30) : '',
+      url: typeof x.url === 'string' ? x.url : '',
+      links: links.slice(0, 10),
+      linksText: typeof x.linksText === 'string' ? x.linksText : links.join('\n'),
+      keyword: typeof x.keyword === 'string' ? x.keyword.slice(0, 80) : '',
+      domain: ['ai', 'policy', 'energy', 'custom'].includes(x.domain) ? x.domain : 'custom',
+      enabled: x.enabled !== false,
+    });
+    if (out.length >= MAX_CUSTOM_SOURCES) break;
   }
+  return out;
 }
 function saveSources() {
   try { localStorage.setItem(SRC_STORE, JSON.stringify(sourcesStore)); return true; } catch (_) { return false; }
@@ -690,8 +696,36 @@ function checkUrlClient(raw, opts = {}) {
   return '';
 }
 
+// 校验一条来源，返回 { name, url, links } 的错误文字（无错误则为空对象）
+function parseLinks(text) {
+  return [...new Set(String(text || '').match(/https?:\/\/[^\s"'<>，。；;]+/g) || [])];
+}
+function validateSrc(s) {
+  const err = {};
+  if (!String(s.name || '').trim()) err.name = '请填写名称';
+  const url = String(s.url || '').trim();
+  const links = parseLinks(s.linksText);
+  if (s.type === 'web') {
+    if (!url) err.url = '请填写网址（文章列表页或 RSS/Atom）';
+    else { const e = checkUrlClient(url); if (e) err.url = e; }
+  } else {
+    if (url) { const e = checkUrlClient(url); if (e) err.url = e; }
+    if (String(s.linksText || '').trim() && !links.length) err.links = '没有识别到链接，请粘贴 https://mp.weixin.qq.com/s/… 文章链接（每行一条）';
+    else if (links.length > 10) err.links = `文章链接最多 10 条（现有 ${links.length} 条）`;
+    else for (const l of links) { const e = checkUrlClient(l, { wechat: true }); if (e) { err.links = `${l.slice(0, 48)}…：${e}`; break; } }
+    if (!url && !links.length && !err.links) err.url = '请填写 RSS/Atom 地址，或在下方粘贴 mp.weixin.qq.com 文章链接';
+  }
+  return err;
+}
+const isValidSrc = (s) => !Object.keys(validateSrc(s)).length;
+function normSrc(s) {
+  return { id: s.id, type: s.type, name: s.name.trim(), url: s.url.trim(), links: s.type === 'wechat' ? parseLinks(s.linksText) : [], keyword: (s.keyword || '').trim(), domain: s.domain, enabled: s.enabled };
+}
 function customActiveSources(domains) {
-  return sourcesStore.filter((s) => s.enabled && domains.includes(s.domain));
+  return sourcesStore.filter((s) => s.enabled && domains.includes(s.domain) && isValidSrc(s)).map(normSrc);
+}
+function skippedInvalidCount(domains) {
+  return sourcesStore.filter((s) => s.enabled && domains.includes(s.domain) && !isValidSrc(s)).length;
 }
 function hashStr(str) {
   let h = 5381;
@@ -814,7 +848,7 @@ async function runCustom(seq, start, end, domains, meta, out, draw) {
 
 function customDomainState(meta) {
   const c = meta.custom || { state: 'none' };
-  const has = sourcesStore.some((s) => s.enabled && s.domain === 'custom');
+  const has = sourcesStore.some((s) => s.enabled && s.domain === 'custom' && isValidSrc(s));
   return { ...c, hasSources: has, state: c.state === 'none' && has ? 'none' : c.state };
 }
 function customEmptyHtml(st) {
@@ -829,7 +863,10 @@ function customEmptyHtml(st) {
 function renderCustomNote(meta) {
   const el = $('#customNote');
   const c = meta.custom;
-  if (!c || c.state === 'none') { el.hidden = true; return; }
+  if (!c || c.state === 'none') {
+    if (meta.skipped) { el.classList.add('bad'); el.textContent = `有 ${meta.skipped} 个已启用的自定义来源没有填写完整（名称/网址缺失或无效），已跳过。请在「来源设置」里补全。`; el.hidden = false; } else el.hidden = true;
+    return;
+  }
   const host = WORKER_URL.replace(/^https?:\/\//, '');
   el.classList.remove('bad');
   let html = '';
@@ -837,6 +874,7 @@ function renderCustomNote(meta) {
   else if (c.state === 'done') html = `自定义来源：${escapeHtml(c.note)}${c.elapsed ? ` · 用时 ${(c.elapsed / 1000).toFixed(1)}s` : ''}，结果已缓存到本机，Worker 不可达时仍可显示。`;
   else if (c.state === 'offline') { el.classList.add('bad'); html = `无法连接 Worker：${escapeHtml(c.error)}。下面的自定义来源结果是<b>本机缓存</b>${c.partialCache ? '（仅含曾抓取过的来源）' : ''}（缓存于 ${escapeHtml(c.cachedAt)}），可能不是最新。中国大陆手机网络通常无法访问 ${escapeHtml(host)}，换用电脑 / 海外网络 / 可访问 workers.dev 的网络即可更新。`; }
   else { el.classList.add('bad'); html = `无法抓取自定义来源：${escapeHtml(c.error)}。本机没有该日期范围的缓存，自定义来源暂无结果；内置来源不受影响。中国大陆手机网络通常无法访问 ${escapeHtml(host)}。`; }
+  if (meta.skipped) html += ` 另有 ${meta.skipped} 个已启用来源没填完整，已跳过。`;
   if (c.clamped) html += ` （日期范围超过 ${CUSTOM_MAX_DAYS} 天，自定义来源只取最近 ${CUSTOM_MAX_DAYS} 天）`;
   el.innerHTML = html;
   el.hidden = false;
@@ -872,10 +910,85 @@ function setSrcPing(ok, text) {
 
 function domainTitle(d) { return (DOMAIN_META[d] || {}).title || d; }
 
-function renderSettings() {
+function srcMsg(text, bad) {
+  const el = $('#srcMsg');
+  el.textContent = text;
+  el.classList.toggle('error', !!bad);
+}
+function catMsg(type, text, bad) {
+  const el = $(type === 'web' ? '#msgWeb' : '#msgWechat');
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.toggle('error', !!bad);
+}
+
+function syncCustomCheckbox(force) {
+  const cb = $('.domains input[value="custom"]');
+  if (!cb) return;
+  const has = sourcesStore.some((s) => s.enabled && s.domain === 'custom' && isValidSrc(s));
+  if (force && has) cb.checked = true;
+}
+
+const PH = {
+  web: { name: '名称（如：IT之家）', url: '网址：文章列表页或 RSS/Atom（https://…）' },
+  wechat: { name: '公众号名称（如：通威新能源）', url: 'RSS/Atom 地址（wechat2rss / RSSHub / feeddd，可选）' },
+};
+
+function rowHtml(s) {
+  const ph = PH[s.type];
+  const domSel = ['ai', 'policy', 'energy', 'custom'].map((d) => `<option value="${d}" ${s.domain === d ? 'selected' : ''}>${domainTitle(d)}</option>`).join('');
+  return `
+    <div class="src-row1">
+      <label class="switch" title="启用/停用"><input type="checkbox" class="src-toggle" data-f="enabled" ${s.enabled ? 'checked' : ''} aria-label="启用该来源" /><span></span></label>
+      <span class="kind-tag ${s.type}">${KIND_LABEL[s.type]}</span>
+      <input class="src-in src-name-in" data-f="name" value="${escapeHtml(s.name)}" placeholder="${escapeHtml(ph.name)}" maxlength="30" aria-label="来源名称" autocomplete="off" />
+      <select class="src-domain" data-f="domain" aria-label="归入领域">${domSel}</select>
+      <button type="button" class="btn btn-ghost src-del" aria-label="删除该来源">删除</button>
+    </div>
+    <div class="src-row2">
+      <input class="src-in" data-f="url" value="${escapeHtml(s.url)}" placeholder="${escapeHtml(ph.url)}" inputmode="url" aria-label="网址" autocomplete="off" />
+      ${s.type === 'wechat' ? `<textarea class="src-in" data-f="linksText" rows="2" placeholder="或粘贴 mp.weixin.qq.com/s/… 文章链接，每行一条（最多 10 条）" aria-label="文章链接">${escapeHtml(s.linksText)}</textarea>` : ''}
+      <input class="src-in" data-f="keyword" value="${escapeHtml(s.keyword)}" placeholder="关键词过滤（可选；逗号分隔，-开头为排除）" maxlength="80" aria-label="关键词过滤" autocomplete="off" />
+    </div>
+    <div class="src-state" role="status"></div>`;
+}
+
+// 只更新某一行的状态提示/输入框标红，不重绘输入框（避免丢失焦点）
+function refreshRowState(li, saved) {
+  const s = sourcesStore.find((x) => x.id === li.dataset.id);
+  if (!s) return;
+  const err = validateSrc(s);
+  const msgs = Object.values(err);
+  const box = li.querySelector('.src-state');
+  li.classList.toggle('off', !s.enabled);
+  li.classList.toggle('bad', msgs.length > 0);
+  li.querySelectorAll('.src-in').forEach((el) => {
+    const f = el.dataset.f;
+    el.classList.toggle('invalid', !!err[f] && (el.value.trim() !== '' || f === 'name' && touched.has(s.id)));
+  });
+  if (msgs.length) {
+    box.className = 'src-state bad';
+    box.textContent = `${s.enabled ? '暂不生效' : '已停用'}：${msgs.join('；')}`;
+  } else {
+    box.className = 'src-state ok';
+    box.textContent = s.enabled ? `✓ ${saved ? '已自动保存' : '已保存'}，点「推送新闻」后参与抓取（归入「${domainTitle(s.domain)}」）` : '已停用（不参与抓取）';
+  }
+  updateSrcCount();
+}
+const touched = new Set();
+
+function updateSrcCount() {
   const total = sourcesStore.length;
-  const on = sourcesStore.filter((s) => s.enabled).length;
-  $('#srcCount').textContent = total ? `（自定义 ${total}/${MAX_CUSTOM_SOURCES} 个，启用 ${on} 个）` : '（未添加自定义来源）';
+  const on = sourcesStore.filter((s) => s.enabled && isValidSrc(s)).length;
+  const bad = sourcesStore.filter((s) => s.enabled && !isValidSrc(s)).length;
+  $('#srcCount').textContent = total ? `（自定义 ${total}/${MAX_CUSTOM_SOURCES} 个，生效 ${on} 个${bad ? `，${bad} 个未填完整` : ''}）` : '（未添加自定义来源）';
+  for (const type of ['web', 'wechat']) {
+    const btn = $(type === 'web' ? '#addWeb' : '#addWechat');
+    if (btn) btn.classList.toggle('full', total >= MAX_CUSTOM_SOURCES);
+  }
+}
+
+function renderSettings(focusId) {
   for (const type of ['web', 'wechat']) {
     const ul = $(type === 'web' ? '#listWeb' : '#listWechat');
     const list = sourcesStore.filter((s) => s.type === type);
@@ -883,117 +996,96 @@ function renderSettings() {
     if (!list.length) {
       const li = document.createElement('li');
       li.className = 'src-empty';
-      li.textContent = type === 'web' ? '还没有网页来源' : '还没有公众号来源';
+      li.textContent = type === 'web' ? '还没有网页来源，点下方「＋ 添加网页来源」' : '还没有公众号来源，点下方「＋ 添加公众号来源」';
       ul.appendChild(li);
     }
     for (const s of list) {
       const li = document.createElement('li');
-      li.className = 'src-item' + (s.enabled ? '' : ' off');
+      li.className = 'src-item';
       li.dataset.id = s.id;
-      const target = s.type === 'wechat' && s.links.length && !s.url ? `${s.links.length} 篇文章链接` : s.url;
-      li.innerHTML = `
-        <label class="switch" title="启用/停用"><input type="checkbox" class="src-toggle" ${s.enabled ? 'checked' : ''} aria-label="启用 ${escapeHtml(s.name)}" /><span></span></label>
-        <div class="src-main"><div class="src-name"><span class="kind-tag ${s.type}">${KIND_LABEL[s.type]}</span> ${escapeHtml(s.name)}</div>
-          <div class="src-detail" title="${escapeHtml(s.url || s.links.join('\n'))}">${escapeHtml(target || '')}${s.type === 'wechat' && s.url && s.links.length ? ` + ${s.links.length} 篇文章链接` : ''}${s.keyword ? ` · 关键词：${escapeHtml(s.keyword)}` : ''}</div></div>
-        <select class="src-domain" aria-label="归入领域">${['ai', 'policy', 'energy', 'custom'].map((d) => `<option value="${d}" ${s.domain === d ? 'selected' : ''}>${domainTitle(d)}</option>`).join('')}</select>
-        <button type="button" class="btn btn-ghost src-del" aria-label="删除 ${escapeHtml(s.name)}">删除</button>`;
+      li.innerHTML = rowHtml(s);
       ul.appendChild(li);
+      refreshRowState(li);
     }
   }
   $('#srcWorkerHost').textContent = WORKER_URL.replace(/^https?:\/\//, '');
-}
-
-function srcMsg(text, bad) {
-  const el = $('#srcMsg');
-  el.textContent = text;
-  el.classList.toggle('error', !!bad);
-}
-
-function syncCustomCheckbox(force) {
-  const cb = $('.domains input[value="custom"]');
-  if (!cb) return;
-  const has = sourcesStore.some((s) => s.enabled && s.domain === 'custom');
-  if (force && has) cb.checked = true;
-}
-
-function addSource(type, form) {
-  const f = new FormData(form);
-  const name = String(f.get('name') || '').trim();
-  const keyword = String(f.get('keyword') || '').trim();
-  const domain = String(f.get('domain') || 'custom');
-  if (sourcesStore.length >= MAX_CUSTOM_SOURCES) return srcMsg(`最多添加 ${MAX_CUSTOM_SOURCES} 个自定义来源，请先删除不用的`, true);
-  if (!name) return srcMsg('请填写名称', true);
-  const rec = { id: uid(), type, name, url: '', links: [], keyword, domain: ['ai', 'policy', 'energy', 'custom'].includes(domain) ? domain : 'custom', enabled: true };
-  if (type === 'web') {
-    const url = String(f.get('url') || '').trim();
-    const err = checkUrlClient(url);
-    if (err) return srcMsg(err, true);
-    rec.url = url;
-  } else if (f.get('mode') === 'links') {
-    const text = String(f.get('links') || '');
-    const found = [...new Set(text.match(/https?:\/\/[^\s"'<>，。]+/g) || [])];
-    if (!found.length) return srcMsg('没有识别到文章链接，请粘贴 https://mp.weixin.qq.com/s/… 链接（每行一条）', true);
-    if (found.length > 10) return srcMsg('文章链接最多 10 条', true);
-    for (const l of found) {
-      const err = checkUrlClient(l, { wechat: true });
-      if (err) return srcMsg(`${l.slice(0, 50)}：${err}`, true);
+  updateSrcCount();
+  if (focusId) {
+    const li = document.querySelector(`li.src-item[data-id="${focusId}"]`);
+    if (li) {
+      const inp = li.querySelector('.src-name-in');
+      try { li.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) { /* 旧浏览器 */ }
+      if (inp) inp.focus({ preventScroll: true });
     }
-    rec.links = found;
-  } else {
-    const url = String(f.get('url') || '').trim();
-    const err = checkUrlClient(url);
-    if (err) return srcMsg(err, true);
-    rec.url = url;
   }
-  sourcesStore.push(rec);
-  if (!saveSources()) srcMsg('保存失败（浏览器禁止写入 localStorage？），刷新后配置会丢失', true);
-  else srcMsg(`已添加「${name}」，点上方「推送新闻」后生效${rec.domain === 'custom' ? '（已勾选「自定义」领域）' : ''}`);
-  form.reset();
-  toggleWechatMode();
-  syncCustomCheckbox(true);
-  renderSettings();
 }
 
-function toggleWechatMode() {
-  const form = $('#formWechat');
-  const links = form.elements.mode.value === 'links';
-  form.elements.url.hidden = links;
-  form.elements.links.hidden = !links;
+function persist(type) {
+  if (!saveSources()) { const m = '保存失败：浏览器禁止写入 localStorage（隐私模式？），刷新后配置会丢失'; catMsg(type, m, true); srcMsg(m, true); return false; }
+  return true;
+}
+
+// 点击「添加」：立即追加一行可编辑的空白来源，聚焦名称输入框；永不静默失败
+function addBlankSource(type) {
+  if (sourcesStore.length >= MAX_CUSTOM_SOURCES) {
+    const m = `已达上限：最多 ${MAX_CUSTOM_SOURCES} 个自定义来源，请先删除不用的再添加`;
+    catMsg(type, m, true);
+    srcMsg(m, true);
+    return;
+  }
+  const s = { id: uid(), type, name: '', url: '', links: [], linksText: '', keyword: '', domain: 'custom', enabled: true };
+  sourcesStore.push(s);
+  persist(type);
+  renderSettings(s.id);
+  catMsg(type, `已新增一行（第 ${sourcesStore.length}/${MAX_CUSTOM_SOURCES} 个）：填写名称和网址即自动保存并生效，可继续点击添加更多`, false);
+  srcMsg('', false);
+}
+
+function onRowInput(e) {
+  const el = e.target;
+  const f = el.dataset && el.dataset.f;
+  const li = el.closest && el.closest('li.src-item');
+  if (!f || !li) return;
+  const s = sourcesStore.find((x) => x.id === li.dataset.id);
+  if (!s) return;
+  if (f === 'enabled') s.enabled = el.checked;
+  else if (f === 'domain') s.domain = ['ai', 'policy', 'energy', 'custom'].includes(el.value) ? el.value : 'custom';
+  else s[f] = el.value;
+  if (f === 'name') touched.add(s.id);
+  if (f === 'linksText') s.links = parseLinks(s.linksText).slice(0, 10);
+  if (persist(s.type)) { /* 已保存 */ }
+  refreshRowState(li, true);
+  syncCustomCheckbox(true);
+  catMsg(s.type, '', false);
 }
 
 function initSettings() {
   sourcesStore = loadSources();
   renderSettings();
   syncCustomCheckbox(true);
-  $('#formWeb').addEventListener('submit', (e) => { e.preventDefault(); addSource('web', e.target); });
-  $('#formWechat').addEventListener('submit', (e) => { e.preventDefault(); addSource('wechat', e.target); });
-  $$('#formWechat input[name="mode"]').forEach((r) => r.addEventListener('change', toggleWechatMode));
-  const onList = (e) => {
-    const li = e.target.closest('li.src-item');
-    if (!li) return;
-    const s = sourcesStore.find((x) => x.id === li.dataset.id);
-    if (!s) return;
-    if (e.target.classList.contains('src-toggle')) { s.enabled = e.target.checked; saveSources(); renderSettings(); syncCustomCheckbox(true); }
-    else if (e.target.classList.contains('src-domain')) { s.domain = e.target.value; saveSources(); syncCustomCheckbox(true); srcMsg(`「${s.name}」已归入「${domainTitle(s.domain)}」`); }
-  };
+  $('#addWeb').addEventListener('click', () => addBlankSource('web'));
+  $('#addWechat').addEventListener('click', () => addBlankSource('wechat'));
   for (const id of ['#listWeb', '#listWechat']) {
-    $(id).addEventListener('change', onList);
-    $(id).addEventListener('click', (e) => {
-      const btn = e.target.closest('.src-del');
+    const ul = $(id);
+    ul.addEventListener('input', onRowInput);
+    ul.addEventListener('change', onRowInput);
+    ul.addEventListener('click', (e) => {
+      const btn = e.target.closest && e.target.closest('.src-del');
       if (!btn) return;
       const li = btn.closest('li.src-item');
       const s = sourcesStore.find((x) => x.id === li.dataset.id);
       sourcesStore = sourcesStore.filter((x) => x.id !== li.dataset.id);
-      saveSources();
+      persist(s ? s.type : 'web');
       renderSettings();
-      srcMsg(s ? `已删除「${s.name}」` : '已删除');
+      const m = `已删除${s && s.name.trim() ? `「${s.name.trim()}」` : '该来源'}`;
+      catMsg(s ? s.type : 'web', m, false);
     });
   }
   $('#clearCacheBtn').addEventListener('click', () => {
-    try { localStorage.removeItem(CACHE_STORE); } catch (_) { /* 忽略 */ }
-    srcMsg('已清除本机缓存的自定义结果（来源配置保留）');
+    try { localStorage.removeItem(CACHE_STORE); srcMsg('已清除本机缓存的自定义结果（来源配置保留）'); } catch (e) { srcMsg('清除失败：' + e.message, true); }
   });
-  if (sourcesStore.length) $('#srcSettings').open = false;
+  if (sourcesStore.length && sourcesStore.every(isValidSrc)) $('#srcSettings').open = false;
+  else if (sourcesStore.length) $('#srcSettings').open = true;
 }
 
 bind();

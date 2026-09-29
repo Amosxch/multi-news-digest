@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>多领域新闻推送</title>
   <meta name="description" content="自定义时间范围，手动推送 AI / 国家政策 / 新能源简报" />
-  <link rel="stylesheet" href="./styles.css?v=20260929g" />
+  <link rel="stylesheet" href="./styles.css?v=20260929h" />
 </head>
 <body>
   <div class="wrap">
@@ -67,36 +67,19 @@
             <div id="srcPing" class="src-ping"></div>
           </div>
           <p class="hint">内置默认来源（始终启用，无需设置）：AI —— 钛媒体AGI、Aibase基地；政策 —— 中国政府网、财政部、国家发展改革委、政策补贴宝；新能源 —— 中国储能网、36氪、国家能源局。
-            下面添加的自定义来源最多 10 个，可归入任一领域（AI / 国家政策 / 新能源 / 自定义），结果同样经过摘要与利好/利空分析。改动自动保存在本机，点「推送新闻」后生效。</p>
+            下面添加的自定义来源最多 10 个，可归入任一领域（AI / 国家政策 / 新能源 / 自定义），结果同样经过摘要与利好/利空分析。点「＋ 添加」会立即新增一行，直接在行内填写名称/网址，输入即自动保存在本机；填完整后点「推送新闻」生效。</p>
 
           <section class="src-cat" data-type="web">
             <h3><span class="kind-tag web">网页</span> 网页来源 <small>文章列表页 或 RSS/Atom 订阅</small></h3>
             <ul class="src-list" id="listWeb"></ul>
-            <form class="src-add" id="formWeb" autocomplete="off">
-              <input name="name" placeholder="名称（如：IT之家）" maxlength="30" aria-label="网页来源名称" />
-              <input name="url" placeholder="网址：列表页或 RSS/Atom（https://…）" inputmode="url" aria-label="网页地址" />
-              <input name="keyword" placeholder="关键词过滤（可选；逗号分隔，-开头为排除）" maxlength="80" aria-label="关键词过滤" />
-              <select name="domain" aria-label="归入领域"><option value="ai">归入：AI新闻</option><option value="policy">归入：国家政策</option><option value="energy">归入：新能源</option><option value="custom" selected>归入：自定义</option></select>
-              <button class="btn btn-ghost" type="submit">添加网页来源</button>
-            </form>
+            <div class="src-addbar"><button type="button" class="btn btn-ghost src-add-btn" id="addWeb">＋ 添加网页来源</button><span id="msgWeb" class="status src-cat-msg" role="status"></span></div>
           </section>
 
           <section class="src-cat" data-type="wechat">
             <h3><span class="kind-tag wechat">公众号</span> 微信公众号 <small>RSS/Atom 桥接地址 或 粘贴文章链接</small></h3>
             <p class="hint small">微信没有公开的公众号历史文章列表，无法直接按名称抓取。请使用 wechat2rss / RSSHub / feeddd 等生成的 RSS/Atom 地址，或粘贴 mp.weixin.qq.com 的文章链接（Worker 读取标题、发布时间、公众号名、摘要）。</p>
             <ul class="src-list" id="listWechat"></ul>
-            <form class="src-add" id="formWechat" autocomplete="off">
-              <input name="name" placeholder="公众号名称（如：通威新能源）" maxlength="30" aria-label="公众号名称" />
-              <div class="mode" role="radiogroup" aria-label="添加方式">
-                <label><input type="radio" name="mode" value="rss" checked /> RSS/Atom 地址</label>
-                <label><input type="radio" name="mode" value="links" /> 粘贴文章链接</label>
-              </div>
-              <input name="url" placeholder="RSS/Atom 地址（https://…）" inputmode="url" aria-label="公众号 RSS 地址" />
-              <textarea name="links" rows="3" placeholder="每行一条 https://mp.weixin.qq.com/s/… 文章链接（最多 10 条）" aria-label="文章链接" hidden></textarea>
-              <input name="keyword" placeholder="关键词过滤（可选）" maxlength="80" aria-label="关键词过滤" />
-              <select name="domain" aria-label="归入领域"><option value="ai">归入：AI新闻</option><option value="policy">归入：国家政策</option><option value="energy">归入：新能源</option><option value="custom" selected>归入：自定义</option></select>
-              <button class="btn btn-ghost" type="submit">添加公众号来源</button>
-            </form>
+            <div class="src-addbar"><button type="button" class="btn btn-ghost src-add-btn" id="addWechat">＋ 添加公众号来源</button><span id="msgWechat" class="status src-cat-msg" role="status"></span></div>
           </section>
 
           <div class="src-foot">
@@ -114,6 +97,6 @@
       数据来自内置来源的精选条目与你自定义的网页 / 公众号来源 · 单页静态站，可部署于 GitHub Pages · 排除广告 / 水文 / 娱乐八卦
     </footer>
   </div>
-  <script src="./app.js?v=20260929g"></script>
+  <script src="./app.js?v=20260929h"></script>
 </body>
 </html>
