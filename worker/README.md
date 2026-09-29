@@ -39,6 +39,39 @@ Item schema matches `data/news.json` of the static site, so the frontend merges 
 
 We do not solve JS/WAF challenges; blocked sites are reported with `status: "blocked"`.
 
+## Custom sources — `POST /api/custom` (user-defined 网页 / 微信公众号)
+
+Body (JSON, ≤24 KB, `Content-Type: application/json`; CORS allows `POST` from `ALLOWED_ORIGINS`/localhost):
+```json
+{ "start":"2026-09-20","end":"2026-09-29","limit":10,
+  "sources":[
+   {"id":"a1","type":"web","name":"IT之家","url":"https://www.ithome.com/rss/","keyword":"AI,芯片 -广告","domain":"ai"},
+   {"id":"a2","type":"web","name":"某站列表页","url":"https://example.com/news/","domain":"energy"},
+   {"id":"a3","type":"wechat","name":"通威新能源","links":["https://mp.weixin.qq.com/s/…"],"domain":"custom"},
+   {"id":"a4","type":"wechat","name":"某公众号","url":"https://your-wechat2rss-or-rsshub/feed/xxx","domain":"custom"} ] }
+```
+* **Validation**: ≤10 sources (disabled ones ignored), `type` ∈ `web|wechat`, `domain` ∈ `ai|policy|energy|custom` (else `custom`),
+  name ≤30, keyword ≤80, ≤10 article links per WeChat source (must be `mp.weixin.qq.com`), range ≤92 days. Errors → HTTP 400 `{error}` (Chinese text).
+* **SSRF guard** (`checkUrl`, applied to every URL *and* every redirect hop; redirects are followed manually, max 4, each hop counts as a subrequest):
+  http/https only; no credentials; no IP literals (v4, v6, decimal/hex forms); no `localhost`, single-label hosts, `*.local/.internal/.lan/...`;
+  no `*.workers.dev` (incl. itself); ports limited to 80/443/8080/8443/1200. Response bodies are capped (feeds/lists 1.5 MB, WeChat pages read only the first 900 KB via streaming).
+  Cloudflare's network additionally refuses to connect to private ranges.
+* **Fetcher** — `web`: RSS 2.0 / Atom / RDF / JSON Feed auto-detected; otherwise HTML list page: `<a>` links on the same registrable domain, title = anchor text (card-style anchors: title + summary + date fragments),
+  date from anchor text → URL (`/20260921/`, `t20260921_`) → text after/before the link inside the same list item (`2026-09-27`, `09-26`, `9月3日`, `3小时前`, calendar `<em>29</em><span>2026-09</span>`);
+  if <3 dated links it tries the page's `<link rel=alternate type=application/rss+xml>`, then peeks at ≤3 detail pages for `article:published_time`/JSON-LD/`<time>`. Undated items are dropped.
+  `wechat`: either an RSS/Atom feed (wechat2rss / RSSHub / feeddd…) and/or pasted article links; each article page is parsed for `og:title`, publish time (`var ct` epoch → CST date, fallbacks `create_time`/`createTime`), account (`nick_name`/`var nickname`), summary (`og:description` → `js_content` text).
+* **Keyword filter**: comma/space separated words, any-match on title+summary; a leading `-` excludes.
+* **Pipeline**: items in `[start,end]` (CST, ≤ today) → per-`domain` group → `selectCandidates` → `analyze` (same LLM prompt: summary/sentiment/analysis/importance; `custom` domain skips the topic filter). Output items carry `kind: "web"|"wechat"`, `source` = your name, `custom:true`, `live:true`.
+* **Budget**: `SUBREQUEST_BUDGET-6` for fetching, shared by sources (web wants ≤5, wechat 1 + one per link; scaled down when over budget); fetch timeout 9 s, source deadline 22 s; LLM calls have a separate small budget.
+* **Cache**: KV `v3:cust:{sha1(normalized config+range)}` — 20 min if range includes today, 6 h for past ranges; only written when every source is `ok|empty` and the LLM analysed. `"fresh": true` bypasses.
+* **Response**: `{start,end,items[],sources:[{id,name,kind,domain,status:ok|empty|partial|error,count,total,requests,ms,feed,note,error,links?}],domain_meta,candidates,subrequests,elapsed_ms,cache}`.
+* **Tests**: `node test/custom-unit.mjs [--online]` (SSRF/validation/date/feed/list/WeChat parsers; `--online` hits real ithome RSS, ruanyifeng Atom, escn/aibase/ndrc list pages, a real mp.weixin.qq.com article).
+
+### WeChat limits (honest)
+* Only **public individual article URLs** (`mp.weixin.qq.com/s/…`) can be fetched; an account's history list needs login/WeChat client and cannot be scraped. Accounts must come via an RSS bridge you run/trust, or pasted links.
+* WeChat may show a "环境异常/验证" page or captcha to datacenter IPs after volume; deleted/violating/expired articles are reported per link (`links[].error`) — tested OK from the Worker on 3 public articles (each page ≈3.4 MB, so only the first 900 KB is read).
+* Public RSSHub (`rsshub.app`) returned 403 from datacenter IPs in our tests; wechat2rss/feeddd usually need your own instance/token URL.
+
 ## Limits & budget
 * Free plan: 50 subrequests / invocation, 10 ms CPU (I/O wait not counted). Default `SUBREQUEST_BUDGET=46`, split
   across requested domains and then across sources (each source has a `budget`). The frontend calls one domain per
@@ -77,6 +110,8 @@ Local: `npx wrangler dev` (AI binding always runs remotely and needs login), or 
 * `src/index.js` router, CORS, orchestration, KV cache, static fallback
 * `src/util.js` date helpers, fetch-with-timeout + subrequest budget (`Ctx`), `pagedSearch` interpolation search
 * `src/sources/{ai,policy,energy}.js` one fetcher per site; `src/sources/index.js` registry
+* `src/custom.js` user-defined sources: validation, SSRF guard, safe fetch, RSS/Atom/JSON Feed + HTML list + WeChat article parsers
+* `test/custom-unit.mjs` parser/validation tests
 * `src/rank.js` heuristic scoring (domain keywords, source weight, ad/fluff/patent-filler penalties) + diversity
 * `src/llm.js` Workers AI / OpenAI-compatible call, JSON extraction, validation
 * `frontend.patch` first frontend diff; `frontend-v3.patch` diff vs. live commit 4759c21 (per-domain loading, ping, version check)

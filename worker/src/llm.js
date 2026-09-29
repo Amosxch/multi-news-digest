@@ -2,7 +2,7 @@
 // Default: Workers AI binding (env.AI, model env.AI_MODEL). Override: any OpenAI-compatible
 // endpoint when secret LLM_API_KEY is set (env.LLM_BASE_URL, env.LLM_MODEL).
 
-const DOMAIN_CN = { ai: 'AI/人工智能', policy: '国家政策', energy: '新能源/储能' };
+const DOMAIN_CN = { ai: 'AI/人工智能', policy: '国家政策', energy: '新能源/储能', custom: '综合资讯（用户自选来源）' };
 
 function buildPrompt(domain, cands, limit) {
   const lines = cands.map((c, i) => `${i}. [${c.date}][${c.source}] ${c.title}${c.desc ? ' —— ' + c.desc.slice(0, 120) : ''}`).join('\n');
@@ -13,7 +13,7 @@ function buildPrompt(domain, cands, limit) {
 ${lines}
 
 任务：
-1. 剔除广告、软文/水文、会议报名/招商、娱乐八卦、与“${DOMAIN_CN[domain]}”无关或无实质内容的条目。
+1. 剔除广告、软文/水文、会议报名/招商、娱乐八卦${domain === 'custom' ? '' : `、与“${DOMAIN_CN[domain]}”无关`}或无实质内容的条目。
 2. 从余下条目中按重要性挑选最多 ${limit} 条；优先有政策/技术/产业实质影响；尽量覆盖不同日期和不同来源（同一来源一般不超过${Math.max(3, Math.ceil(limit * 0.6))}条）。
 3. 只为被选中的条目输出：
    - i：候选序号

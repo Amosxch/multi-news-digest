@@ -15,10 +15,12 @@ export function score(item, domain) {
   const t = item.title || '';
   const d = item.desc || '';
   let s = SOURCE_W[item.source] || 1;
-  const hitsT = (t.match(KW[domain]) || []).length;
-  const hitsD = (d.match(KW[domain]) || []).length;
-  s += Math.min(hitsT, 3) * 1.5 + Math.min(hitsD, 3) * 0.5;
-  if (hitsT + hitsD === 0) s -= domain === 'policy' ? 1 : 4; // off-topic (36kr full-text search noise etc.)
+  if (KW[domain]) {
+    const hitsT = (t.match(KW[domain]) || []).length;
+    const hitsD = (d.match(KW[domain]) || []).length;
+    s += Math.min(hitsT, 3) * 1.5 + Math.min(hitsD, 3) * 0.5;
+    if (hitsT + hitsD === 0) s -= item.kind ? 1 : domain === 'policy' ? 1 : 4; // off-topic (36kr full-text search noise etc.)
+  }
   if (JUNK.test(t)) s -= 6;
   if (DIGEST.test(t)) s -= 0.8;
   if (/(取得|获得|申请).{0,30}专利/.test(t)) s -= 3.5; // auto-generated patent filler

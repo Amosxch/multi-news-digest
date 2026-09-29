@@ -2,6 +2,7 @@ import { SOURCES } from './sources/index.js';
 import { Ctx, BudgetError, dayNum, dayStr, isYmd, todayCst } from './util.js';
 import { selectCandidates } from './rank.js';
 import { analyze } from './llm.js';
+import { validateBody, gatherCustom, LIMITS as CUSTOM_LIMITS } from './custom.js';
 
 const VERSION = 'v3';
 const DOMAINS = ['ai', 'policy', 'energy'];
@@ -13,7 +14,7 @@ function corsHeaders(req, env) {
   const ok = allowed.includes('*') || allowed.includes(origin) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
   return {
     'Access-Control-Allow-Origin': ok ? origin || allowed[0] : allowed[0],
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
@@ -260,12 +261,106 @@ async function handleNews(req, env, ectx) {
   return json(req, env, body, 200, { 'Cache-Control': 'public, max-age=300' });
 }
 
+
+/* ---------------------------------------------------------------- POST /api/custom */
+function originAllowed(req, env) {
+  const origin = req.headers.get('Origin');
+  if (!origin) return true; // non-browser client (curl); browsers always send Origin on cross-origin POST
+  const allowed = String(env.ALLOWED_ORIGINS || 'https://amosxch.github.io').split(',').map((s) => s.trim());
+  return allowed.includes('*') || allowed.includes(origin) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+}
+
+async function handleCustom(req, env, ectx) {
+  if (!originAllowed(req, env)) return json(req, env, { error: 'origin not allowed' }, 403);
+  const len = Number(req.headers.get('Content-Length') || 0);
+  if (len > CUSTOM_LIMITS.maxBody) return json(req, env, { error: '请求体过大' }, 413);
+  let raw;
+  try {
+    raw = await req.text();
+  } catch {
+    return json(req, env, { error: '无法读取请求体' }, 400);
+  }
+  if (raw.length > CUSTOM_LIMITS.maxBody) return json(req, env, { error: '请求体过大' }, 413);
+  let body;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return json(req, env, { error: '请求体不是有效 JSON' }, 400);
+  }
+  const v = validateBody(body, new URL(req.url).hostname, Number(env.MAX_RANGE_DAYS || 92));
+  if (v.error) return json(req, env, { error: v.error }, 400);
+  const today = todayCst();
+  const end = v.end > today ? today : v.end;
+  if (v.start > end) return json(req, env, { start: v.start, end, items: [], sources: [], note: '所选日期都在未来' });
+
+  // cache key: normalized config + range
+  const norm = JSON.stringify([v.start, end, v.limit, v.sources.map((s) => [s.type, s.name, s.domain, s.url || '', s.keyword, (s.links || []).slice().sort()]).sort()]);
+  const key = `${VERSION}:cust:${await sha1(norm)}`;
+  if (!v.fresh) {
+    const hit = await kvGet(env, key);
+    if (hit) return json(req, env, { ...hit, cache: 'hit' }, 200, { 'Cache-Control': 'no-store' });
+  }
+  const ctx = new Ctx({
+    budget: Number(env.SUBREQUEST_BUDGET || 46) - 6, // keep headroom for LLM (OpenAI-compatible override) + KV-free calls
+    deadlineMs: Number(env.SOURCE_DEADLINE_MS || 22000),
+    fetchTimeoutMs: Number(env.FETCH_TIMEOUT_MS || 9000),
+    log: env.DEBUG === '1',
+  });
+  const t0 = Date.now();
+  const g = await gatherCustom(ctx, v.sources, v.start, end, new URL(req.url).hostname);
+  const groups = {};
+  for (const it of g.items) (groups[it.domain] ||= []).push(it);
+  const llmCtx = new Ctx({ budget: 6, deadlineMs: 40000 });
+  const domainMeta = {};
+  const results = await Promise.all(
+    Object.entries(groups).map(async ([domain, list]) => {
+      const pool = selectCandidates(list, domain, Math.min(26, v.limit * 2 + 4));
+      const r = await analyze(env, domain, pool, v.limit, llmCtx);
+      domainMeta[domain] = { candidates: list.length, analyzed: r.analyzed, model: r.model, error: r.error ? String(r.error).slice(0, 300) : undefined };
+      return r.items.map((it) => ({
+        domain,
+        title: it.title,
+        summary: it.summary,
+        date: it.date,
+        url: it.url,
+        source: it.source,
+        kind: it.kind,
+        sentiment: it.sentiment,
+        analysis: it.analysis,
+        importance: it.importance || 1,
+        live: true,
+        custom: true,
+      }));
+    })
+  );
+  const items = results.flat().sort((a, b) => b.date.localeCompare(a.date));
+  const out = {
+    start: v.start,
+    end,
+    generated_at: new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 19) + '+08:00',
+    elapsed_ms: Date.now() - t0,
+    subrequests: ctx.used,
+    items,
+    sources: g.statuses,
+    domain_meta: domainMeta,
+    candidates: g.items.length,
+  };
+  const allOk = g.statuses.every((s) => s.status === 'ok' || s.status === 'empty') && Object.values(domainMeta).every((m) => m.analyzed);
+  if (items.length && allOk) opts_put(ectx, kvPut(env, key, out, end < today ? 6 * 3600 : 20 * 60));
+  return json(req, env, { ...out, cache: 'miss' }, 200, { 'Cache-Control': 'no-store' });
+}
+const opts_put = (ectx, p) => (ectx && ectx.waitUntil ? ectx.waitUntil(p) : p);
+
 export default {
   async fetch(req, env, ectx) {
     const u = new URL(req.url);
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(req, env) });
-    if (req.method !== 'GET') return json(req, env, { error: 'method not allowed' }, 405);
     try {
+      if (u.pathname === '/api/custom') {
+        if (req.method !== 'POST') return json(req, env, { error: 'use POST' }, 405);
+        return await handleCustom(req, env, ectx);
+      }
+      if (req.method !== 'GET') return json(req, env, { error: 'method not allowed' }, 405);
       if (u.pathname === '/api/ping')
         return json(req, env, { ok: true, time: new Date().toISOString(), colo: (req.cf && req.cf.colo) || null, country: (req.cf && req.cf.country) || null }, 200, { 'Cache-Control': 'no-store' });
       if (u.pathname === '/api/news') return await handleNews(req, env, ectx);
