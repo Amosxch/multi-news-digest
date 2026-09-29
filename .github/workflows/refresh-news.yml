@@ -1,0 +1,98 @@
+name: Refresh archive & deploy Pages (manual)
+
+# Manual only: pull the newest days from the public news worker, merge them into
+# data/archive/<month>.json + data/index.json, commit if anything changed, then deploy Pages
+# from this same workflow (a push made with GITHUB_TOKEN does NOT trigger pages.yml).
+# No secrets are needed: the worker URL is public.
+on:
+  # No schedule on purpose: news is fetched on demand by the page (worker) and the static archive is the offline fallback.
+  # Run this manually (Actions -> Run workflow) to top the archive up with the last N days and redeploy Pages.
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'How many recent days to refresh (default 3)'
+        required: false
+        default: '3'
+      force_deploy:
+        description: 'Deploy Pages even when no data changed'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write   # commit refreshed data
+  pages: write
+  id-token: write
+
+# One refresh/deploy at a time; a queued run replaces older queued ones, running ones are never cancelled mid-deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Refresh data from worker
+        id: refresh
+        env:
+          WORKER_URL: https://cf-news-worker.amosxch.workers.dev
+          DAYS: ${{ github.event.inputs.days || '3' }}
+        run: |
+          set +e
+          node scripts/refresh.mjs --days "$DAYS" --data data
+          code=$?
+          set -e
+          # A failed worker call must not wipe or break the site: keep the previous data and still finish green
+          # unless the script itself crashed for a non-network reason.
+          if [ "$code" -ne 0 ]; then echo "::warning::refresh script exited with $code (worker unreachable?) - keeping previous data"; fi
+          if git status --porcelain data | grep -q .; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit refreshed data
+        if: steps.refresh.outputs.changed == 'true'
+        run: |
+          git config user.name  "news-refresh-bot"
+          git config user.email "news-refresh-bot@users.noreply.github.com"
+          git add data
+          git commit -m "chore(data): refresh news $(date -u +'%Y-%m-%d %H:%M UTC') [skip ci]"
+          # main may have moved (manual push while we ran): rebase, retry a few times
+          for i in 1 2 3; do
+            if git push origin HEAD:main; then break; fi
+            git pull --rebase origin main
+          done
+
+      - name: Decide deploy
+        id: decide
+        run: |
+          if [ "${{ steps.refresh.outputs.changed }}" = "true" ] || [ "${{ github.event.inputs.force_deploy }}" = "true" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "No data changes - skipping deploy."
+          fi
+
+      - uses: actions/configure-pages@v5
+        if: steps.decide.outputs.deploy == 'true'
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.decide.outputs.deploy == 'true'
+        with:
+          path: .
+      - id: deployment
+        if: steps.decide.outputs.deploy == 'true'
+        uses: actions/deploy-pages@v4

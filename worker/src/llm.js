@@ -13,16 +13,16 @@ function buildPrompt(domain, cands, limit) {
 ${lines}
 
 任务：
-1. 剔除广告、软文/水文、会议报名/招商、娱乐八卦、与“${DOMAIN_CN[domain]}”无关或无实质内容的条目（keep=false）。
-2. 在保留条目中按重要性挑选最多 ${limit} 条（selected=true），优先有政策/技术/产业实质影响；尽量覆盖不同日期和不同来源（同一来源一般不超过3条）。
-3. 对每个 selected=true 的条目给出：
+1. 剔除广告、软文/水文、会议报名/招商、娱乐八卦、与“${DOMAIN_CN[domain]}”无关或无实质内容的条目。
+2. 从余下条目中按重要性挑选最多 ${limit} 条；优先有政策/技术/产业实质影响；尽量覆盖不同日期和不同来源（同一来源一般不超过${Math.max(3, Math.ceil(limit * 0.6))}条）。
+3. 只为被选中的条目输出：
+   - i：候选序号
    - summary：不超过50个汉字的客观摘要（不要编造候选中没有的数字和事实）
    - sentiment：只能是 "利好"、"利空"、"中性" 之一（对相关产业/市场）
-   - analysis：不超过50个汉字的影响分析，不要以“利好/利空/中性”开头
+   - analysis：不超过40个汉字的影响分析，不要以“利好/利空/中性”开头
    - importance：1-3 的整数，3 最重要
-只输出如下 JSON：
-{"items":[{"i":0,"keep":true,"selected":true,"summary":"...","sentiment":"利好","analysis":"...","importance":2}]}
-所有候选都要出现在 items 中（未选中的只需 i、keep、selected）。`;
+只输出如下紧凑 JSON，不要输出其他内容：
+{"items":[{"i":0,"summary":"...","sentiment":"利好","analysis":"...","importance":2}]}`;
   return { system, user };
 }
 
@@ -85,13 +85,15 @@ async function callWorkersAI(env, system, user) {
         { role: 'system', content: system },
         { role: 'user', content: user },
       ],
-      max_tokens: 2500,
+      max_tokens: 4000,
       temperature: 0.2,
+      chat_template_kwargs: { enable_thinking: false },
     }),
     Number(env.LLM_TIMEOUT_MS || 25000),
     'Workers AI'
   );
-  let text = out?.response ?? out?.choices?.[0]?.message?.content ?? out?.result?.response ?? out;
+  const msg = out?.choices?.[0]?.message;
+  let text = out?.response ?? msg?.content ?? msg?.reasoning_content ?? out?.result?.response ?? out;
   return { text, model };
 }
 
@@ -112,17 +114,25 @@ export async function analyze(env, domain, cands, limit, ctx) {
   if (!useKey && !env.AI) return fallback('no LLM configured');
   const { system, user } = buildPrompt(domain, cands, limit);
   let r;
-  try {
-    r = useKey ? await callOpenAICompat(env, system, user, ctx) : await callWorkersAI(env, system, user);
-  } catch (e) {
-    return fallback(String(e.message || e).slice(0, 200));
+  let j = null;
+  let lastErr = '';
+  for (let attempt = 0; attempt < 2 && !j; attempt++) {
+    try {
+      r = useKey ? await callOpenAICompat(env, system, user, ctx) : await callWorkersAI(env, system, user);
+      j = extractJson(r.text);
+      if (!j || !Array.isArray(j.items)) {
+        j = null;
+        lastErr = 'LLM returned non-JSON: ' + String(typeof r.text === 'string' ? r.text : JSON.stringify(r.text)).slice(0, 700);
+      }
+    } catch (e) {
+      lastErr = String(e.message || e).slice(0, 200);
+    }
   }
-  const j = extractJson(r.text);
-  if (!j || !Array.isArray(j.items)) return fallback('LLM returned non-JSON: ' + String(typeof r.text === 'string' ? r.text : JSON.stringify(r.text)).slice(0, 120));
+  if (!j) return fallback(lastErr);
   const picked = [];
   for (const x of j.items) {
     const c = cands[Number(x.i)];
-    if (!c || x.keep === false || x.selected === false || !x.summary) continue;
+    if (!c || !x.summary) continue;
     if (picked.some((p) => p.url === c.url)) continue;
     const sentiment = ['利好', '利空', '中性'].includes(x.sentiment) ? x.sentiment : '中性';
     picked.push({
@@ -134,6 +144,5 @@ export async function analyze(env, domain, cands, limit, ctx) {
     });
     if (picked.length >= limit) break;
   }
-  const dropped = j.items.filter((x) => x.keep === false).map((x) => Number(x.i));
-  return { analyzed: true, model: r.model, items: picked, dropped: dropped.length };
+  return { analyzed: picked.length > 0, model: r.model, items: picked, error: picked.length ? undefined : 'LLM selected nothing' };
 }

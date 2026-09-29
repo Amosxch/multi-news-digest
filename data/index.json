@@ -1,0 +1,105 @@
+{
+ "version": 1,
+ "updated_at": "2026-09-29T16:06:53+08:00",
+ "checked_at": "2026-09-29T16:06:53+08:00",
+ "timezone": "Asia/Shanghai",
+ "coverage": {
+  "start": "2026-01-01",
+  "end": "2026-09-29"
+ },
+ "months": [
+  {
+   "month": "2026-01",
+   "file": "archive/2026-01.json",
+   "count": 170,
+   "counts": {
+    "ai": 76,
+    "policy": 22,
+    "energy": 72
+   }
+  },
+  {
+   "month": "2026-02",
+   "file": "archive/2026-02.json",
+   "count": 139,
+   "counts": {
+    "ai": 70,
+    "policy": 15,
+    "energy": 54
+   }
+  },
+  {
+   "month": "2026-03",
+   "file": "archive/2026-03.json",
+   "count": 163,
+   "counts": {
+    "ai": 73,
+    "policy": 16,
+    "energy": 74
+   }
+  },
+  {
+   "month": "2026-04",
+   "file": "archive/2026-04.json",
+   "count": 164,
+   "counts": {
+    "ai": 71,
+    "policy": 21,
+    "energy": 72
+   }
+  },
+  {
+   "month": "2026-05",
+   "file": "archive/2026-05.json",
+   "count": 157,
+   "counts": {
+    "ai": 74,
+    "policy": 18,
+    "energy": 65
+   }
+  },
+  {
+   "month": "2026-06",
+   "file": "archive/2026-06.json",
+   "count": 167,
+   "counts": {
+    "ai": 78,
+    "policy": 17,
+    "energy": 72
+   }
+  },
+  {
+   "month": "2026-07",
+   "file": "archive/2026-07.json",
+   "count": 182,
+   "counts": {
+    "ai": 75,
+    "policy": 28,
+    "energy": 79
+   }
+  },
+  {
+   "month": "2026-08",
+   "file": "archive/2026-08.json",
+   "count": 174,
+   "counts": {
+    "ai": 78,
+    "policy": 18,
+    "energy": 78
+   }
+  },
+  {
+   "month": "2026-09",
+   "file": "archive/2026-09.json",
+   "count": 300,
+   "counts": {
+    "ai": 122,
+    "policy": 45,
+    "energy": 133
+   }
+  }
+ ],
+ "notes": {
+  "archive_start": "2026-01-01"
+ }
+}

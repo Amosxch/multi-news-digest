@@ -47,7 +47,7 @@ export const mof = {
         source: '财政部',
       }));
     });
-    return pagedSearch({ start, end, maxProbes: 3, maxRangePages: 2, maxPage: 19, fetchPage: (i) => page(ctx, i) });
+    return pagedSearch({ start, end, maxProbes: 3, maxRangePages: Math.max(2, ctx.budget - 3), maxPage: 19, fetchPage: (i) => page(ctx, i) });
   },
 };
 
@@ -66,7 +66,7 @@ export const ndrc = {
         source: '国家发展改革委',
       }))
     );
-    return pagedSearch({ start, end, maxProbes: 3, maxRangePages: 2, maxPage: 19, fetchPage: (i) => page(ctx, i) });
+    return pagedSearch({ start, end, maxProbes: 3, maxRangePages: Math.max(2, ctx.budget - 3), maxPage: 19, fetchPage: (i) => page(ctx, i) });
   },
 };
 

@@ -27,7 +27,7 @@ export const escn = {
       }
       return out;
     };
-    return pagedSearch({ start, end, maxProbes: 5, maxRangePages: 3, maxPage: 7800, fetchPage });
+    return pagedSearch({ start, end, maxProbes: 7, maxRangePages: Math.max(3, ctx.budget - 8), maxPage: 7800, initialDpp: 0.85, fetchPage });
   },
 };
 

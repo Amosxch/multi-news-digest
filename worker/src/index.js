@@ -69,7 +69,7 @@ async function gatherDomain(env, ctx, domain, start, end, opts) {
   const list = SOURCES[domain];
   const active = list.filter((s) => opts.probe || !BLOCKED.has(s.id));
   const want = active.reduce((a, s) => a + s.budget, 0);
-  const scale = Math.min(1, ctx.remaining() / Math.max(1, want));
+  const scale = opts.deep ? Math.min(3, ctx.remaining() / Math.max(1, want)) : Math.min(1, ctx.remaining() / Math.max(1, want));
   const statuses = [];
   const items = [];
   await Promise.all(
@@ -136,7 +136,11 @@ async function buildDomain(env, ctx, domain, start, end, opts) {
     if (hit) return { ...hit, cache: 'hit' };
   }
   const g = await gatherDomain(env, ctx, domain, start, end, opts);
-  const pool = selectCandidates(g.items, domain, Math.min(14, opts.limit * 2 + 2));
+  const pool = selectCandidates(g.items, domain, Math.min(26, opts.limit * 2 + 4));
+
+  // reuse the whole LLM result when the candidate set is identical (e.g. scheduled refreshes)
+  const poolKey = `${VERSION}:pool:${domain}:${opts.limit}:${await sha1(pool.map((c) => c.url).join('|'))}`;
+  const poolHit = pool.length ? await kvGet(env, poolKey) : null;
 
   // reuse per-item analyses
   const anaKeys = await Promise.all(pool.map((c) => sha1(c.url)));
@@ -144,14 +148,19 @@ async function buildDomain(env, ctx, domain, start, end, opts) {
   let items;
   let llm;
   const priorOk = prior.filter(Boolean);
-  if (pool.length && priorOk.length >= Math.min(opts.limit, pool.length) && prior.slice(0, opts.limit).every(Boolean)) {
+  if (poolHit && Array.isArray(poolHit.items) && poolHit.items.length) {
+    const byUrl = new Map(pool.map((c) => [c.url, c]));
+    items = poolHit.items.map((p) => ({ ...(byUrl.get(p.url) || {}), ...p })).filter((p) => p.title);
+    llm = { analyzed: true, cache: 'pool-hit', model: poolHit.model };
+  } else if (pool.length && priorOk.length >= Math.min(opts.limit, pool.length) && prior.slice(0, opts.limit).every(Boolean)) {
     items = pool.slice(0, opts.limit).map((c, i) => ({ ...c, ...prior[i] }));
     llm = { analyzed: true, cache: 'item-hit' };
   } else {
     const r = await analyze(env, domain, pool, opts.limit, ctx);
     items = r.items;
-    llm = { analyzed: r.analyzed, model: r.model, error: r.error, dropped: r.dropped };
+    llm = { analyzed: r.analyzed, model: r.model, error: r.error ? String(r.error).slice(0, 700) : undefined };
     if (r.analyzed) {
+      opts.waitUntil(kvPut(env, poolKey, { model: r.model, items: r.items.map(({ url, summary, sentiment, analysis, importance }) => ({ url, summary, sentiment, analysis, importance })) }, 14 * 86400));
       opts.waitUntil(
         Promise.all(
           r.items.map(async (it) =>
@@ -215,8 +224,16 @@ async function handleNews(req, env, ectx) {
     limit,
     fresh: u.searchParams.get('fresh') === '1',
     probe: u.searchParams.get('probe') === '1',
+    deep: u.searchParams.get('deep') === '1', // spend the whole subrequest budget (archive builds)
     waitUntil: (p) => ectx.waitUntil(p),
   };
+  const storeMode = u.searchParams.get('store');
+  if ((storeMode === '0' || storeMode === 'pool') && env.NEWS_KV) {
+    // store=0: read-only KV view (archive builds). store=pool: only the small `:pool:` LLM-result cache may be written
+    // (scheduled refresh: unchanged candidate set => no LLM call, and KV write quota is barely used).
+    const kv = env.NEWS_KV;
+    env = { ...env, NEWS_KV: { get: (...a) => kv.get(...a), put: async (k, ...a) => (storeMode === 'pool' && k.includes(':pool:') ? kv.put(k, ...a) : undefined) } };
+  }
   const m = u.searchParams.get('model');
   if (m && /^@cf\/[\w.\/-]+$/.test(m)) { env = { ...env, AI_MODEL: m }; opts.fresh = true; }
   const ctx = new Ctx({

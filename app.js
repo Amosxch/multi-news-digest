@@ -7,12 +7,14 @@ const MAX_PER_DOMAIN = 10;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // 实时抓取服务（Cloudflare Worker）。设为 '' 可关闭实时抓取，仅用 data/news.json
-const APP_VERSION = '20260928c'; // 与 version.json / index.html 中的 ?v= 保持一致
+const APP_VERSION = '20260929f'; // 与 version.json / index.html 中的 ?v= 保持一致
 const WORKER_URL = 'https://cf-news-worker.amosxch.workers.dev';
 const WORKER_TIMEOUT_MS = 90000; // 冷启动 + 多站抓取 + AI 分析，最长约 30~60 秒
 const LIVE_CHUNK_DAYS = 31;      // 超出覆盖的区间按 31 天分段请求（每段每领域约 5 条）
 const LIVE_MAX_CHUNKS = 6;
 const LIVE_LIMIT = 5;
+const LIVE_TAIL_DAYS = 3;        // 静态归档之外，PC 上仍向 Worker 请求最近几天以获得真正实时的结果
+const PING_TIMEOUT_MS = 8000;
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -112,6 +114,7 @@ function renderList(sec, list) {
 
 function coverageOf(data) {
   const cov = data.coverage || {};
+  if (!data.items) return { start: cov.start || '', end: cov.end || '' };
   let { start, end } = cov;
   if (!DATE_RE.test(start || '') || !DATE_RE.test(end || '')) {
     const dates = (data.items || []).map((it) => it.date).filter((d) => DATE_RE.test(d || '')).sort();
@@ -155,11 +158,10 @@ const segText = (a, b) => (a === b ? a : `${a} ~ ${b}`);
 
 function coverageNote(start, end, cov, live) {
   const segs = uncoveredSegments(start, end, cov);
-  if (!segs.length) return '';
   const parts = segs.map(([a, b]) => segText(a, b)).join('、');
-  if (!live) return cov.start ? `数据仅覆盖 ${cov.start} ~ ${cov.end}，超出部分（${parts}）暂无数据` : '';
-  const covTxt = cov.start ? `精选数据覆盖 ${cov.start} ~ ${cov.end}；` : '';
-  return `${covTxt}${parts} ${live.note}`;
+  if (!live) return segs.length && cov.start ? `静态归档仅覆盖 ${cov.start} ~ ${cov.end}，超出部分（${parts}）暂无数据` : '';
+  const covTxt = cov.start ? `静态归档覆盖 ${cov.start} ~ ${cov.end}；` : '';
+  return segs.length || live.sources.length || /正在|已实时/.test(live.note) ? `${covTxt}${segs.length ? parts : '最近几天'} ${live.note}` : live.note;
 }
 
 // meta.state[domain] = { state: 'none' | 'loading' | 'done' | 'failed', live: 实时条数, sources: [...] }
@@ -193,7 +195,7 @@ function render(items, meta) {
     if (st.state === 'loading') {
       const ld = document.createElement('div');
       ld.className = 'loading';
-      ld.innerHTML = `<span class="spinner"></span>正在实时抓取该领域新闻…已用 <b class="elapsed">${Math.round((performance.now() - (meta.t0 || performance.now())) / 1000)}</b> 秒（通常 10~40 秒）`;
+      ld.innerHTML = `<span class="spinner"></span>${st.critical === false ? '正在检查最新新闻（已先显示归档数据）' : '正在实时抓取该领域新闻'}…已用 <b class="elapsed">${Math.round((performance.now() - (meta.t0 || performance.now())) / 1000)}</b> 秒（通常 10~40 秒）`;
       sec.insertBefore(ld, anchor);
     }
 
@@ -203,6 +205,8 @@ function render(items, meta) {
         empty.className = 'empty';
         if (st.state === 'done') {
           empty.innerHTML = `实时抓取未找到该时段新闻${domainSourcesHtml(st.sources)}`;
+        } else if (st.state === 'failed' && !st.critical) {
+          empty.textContent = '静态归档中该时段暂无条目（实时服务当前不可用）';
         } else if (st.state === 'failed') {
           empty.innerHTML = `实时抓取服务连接失败：${escapeHtml(st.error || '未知错误')}。请检查网络能否访问 ${escapeHtml(WORKER_URL.replace(/^https?:\/\//, ''))}，或稍后重试`;
         } else {
@@ -238,8 +242,8 @@ function render(items, meta) {
   } else {
     const shownText = shown < total ? `（展示 ${shown} 条重要）` : '';
     status.textContent = `已推送 ${total} 条${shownText} · ${meta.start} ~ ${meta.end}` +
-      (meta.cov.start ? ` · 精选数据覆盖 ${meta.cov.start} ~ ${meta.cov.end}` : '') +
-      (meta.updated_at ? ` · 更新于 ${fmtUpdated(meta.updated_at)}` : '');
+      (meta.cov.start ? ` · 归档覆盖 ${meta.cov.start} ~ ${meta.cov.end}` : '') +
+      (meta.updated_at ? ` · 数据更新于 ${fmtUpdated(meta.updated_at)}` : '');
   }
 
   const note = $('#coverageNote');
@@ -307,13 +311,63 @@ function renderSources(live, open) {
   box.innerHTML = `<summary>实时来源状态：${okN}/${list.length} 个来源可用${live.elapsed ? ` · 用时 ${(live.elapsed / 1000).toFixed(1)}s` : ''}</summary><ul>${rows.join('')}</ul>`;
 }
 
-async function loadNews(force) {
+// ---- 静态数据层：data/index.json + data/archive/YYYY-MM.json（仅加载与所选区间相交的月份）+ data/news.json（精选） ----
+const monthCache = new Map();
+
+async function getJson(url) {
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`${url.replace(/\?.*$/, '')} (${res.status})`);
+  return res.json();
+}
+
+async function loadIndex(force) {
   if (cachedData && !force) return cachedData;
-  const bust = Date.now();
-  const res = await fetch(`./data/news.json?t=${bust}`, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`加载 data/news.json 失败 (${res.status})`);
-  cachedData = await res.json();
+  try {
+    cachedData = await getJson(`./data/index.json?t=${Date.now()}`);
+  } catch (e) {
+    cachedData = null;
+    throw new Error('加载 data/index.json 失败：' + e.message);
+  }
   return cachedData;
+}
+
+function monthsBetween(start, end) {
+  const out = [];
+  let [y, m] = start.slice(0, 7).split('-').map(Number);
+  const [ey, em] = end.slice(0, 7).split('-').map(Number);
+  while (y < ey || (y === ey && m <= em)) {
+    out.push(`${y}-${String(m).padStart(2, '0')}`);
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+
+async function loadMonth(index, month) {
+  const entry = (index.months || []).find((x) => x.month === month);
+  if (!entry) return [];
+  const key = month + '|' + (index.updated_at || '');
+  if (monthCache.has(key)) return monthCache.get(key);
+  const p = getJson(`./data/${entry.file}?v=${encodeURIComponent(index.updated_at || '')}`).then((j) => j.items || []);
+  monthCache.set(key, p);
+  p.catch(() => monthCache.delete(key));
+  return p;
+}
+
+// 返回区间内的静态条目（归档 + 精选 news.json，按 URL 去重，精选优先）
+async function loadStaticItems(start, end, index) {
+  const errs = [];
+  const lists = await Promise.all(monthsBetween(start, end).map((m) => loadMonth(index, m).catch((e) => { errs.push(e.message); return []; })));
+  let curated = [];
+  try { curated = (await getJson(`./data/news.json?t=${Date.now()}`)).items || []; } catch (_) { /* 精选文件缺失不致命 */ }
+  const seen = new Set();
+  const out = [];
+  for (const it of [...curated, ...lists.flat()]) {
+    if (!it || !it.url || seen.has(it.url) || !DATE_RE.test(it.date || '') || it.date < start || it.date > end) continue;
+    seen.add(it.url);
+    out.push(it);
+  }
+  return { items: out, errors: errs };
 }
 
 async function fetchWithTimeout(url, ms) {
@@ -364,40 +418,62 @@ async function pushNews() {
     const domains = selectedDomains();
     if (!domains.length) throw new Error('请至少选择一个新闻领域');
 
-    let data = { items: [] };
+    let index = null;
     let staticErr = null;
-    try { data = await loadNews(true); } catch (e) { staticErr = e; }
-    const cov = staticErr ? { start: '', end: '' } : coverageOf(data);
-    // 日期均为 YYYY-MM-DD 字符串，按字典序比较即按日期比较（闭区间）
-    const staticItems = (data.items || []).filter((it) => DATE_RE.test(it.date || '') && it.date >= start && it.date <= end);
-    const segs = WORKER_URL ? chunkSegments(uncoveredSegments(start, end, cov)) : [];
-    const meta = { start, end, cov, updated_at: data.updated_at || '', domains, t0: performance.now() };
+    try { index = await loadIndex(true); } catch (e) { staticErr = e; }
+    const cov = index ? coverageOf(index) : { start: '', end: '' };
+    let staticItems = [];
+    if (index) {
+      const r = await loadStaticItems(start, end, index);
+      staticItems = r.items;
+      if (r.errors.length) staticErr = new Error('部分月份文件加载失败：' + r.errors[0]);
+    }
+    const today = todayStr();
+    // 1) 静态归档之外的日期（必须靠实时服务）  2) 归档之内但属于最近几天（PC 上尽量取实时结果，失败则静默使用归档）
+    const must = WORKER_URL ? chunkSegments(uncoveredSegments(start, end, cov)) : [];
+    const tailStart = addDays(today, -(LIVE_TAIL_DAYS - 1));
+    const tailA = start > tailStart ? start : tailStart;
+    const tail = WORKER_URL && end >= tailA && !must.some(([a, b]) => a <= tailA && b >= end) ? [[tailA, end]] : [];
+    const mustCover = (a, b) => must.some(([x, y]) => x <= a && y >= b);
+    const segs = [...must, ...tail.filter(([a, b]) => !mustCover(a, b))];
+    const meta = { start, end, cov, updated_at: index ? index.updated_at || '' : '', domains, t0: performance.now(), static: true };
 
     if (!segs.length) {
-      if (staticErr) throw staticErr;
+      if (staticErr && !staticItems.length) throw staticErr;
+      if (pingPromise) { try { await pingPromise; } catch (_) { /* 忽略 */ } }
+      if (workerPing && workerPing.ok === false) {
+        meta.live = { note: `实时服务不可达，当前显示的是静态归档${index && index.updated_at ? `（数据更新于 ${fmtUpdated(index.updated_at)}）` : ''}`, sources: [] };
+      }
       render(staticItems, meta);
       return;
     }
 
-    // 先即时展示覆盖范围内的精选数据；未覆盖部分逐领域实时抓取，每个响应到达即渲染
+    // 先即时展示静态数据；其余部分逐领域实时抓取，每个响应到达即渲染
+    const critical = must.length > 0;
     const state = {};
-    for (const d of domains) state[d] = { state: 'loading', pending: segs.length, ok: 0, live: 0, sources: [] };
+    for (const d of domains) state[d] = { state: 'loading', pending: segs.length, ok: 0, live: 0, sources: [], critical };
     const liveItems = [];
     const allSources = [];
     meta.state = state;
     meta.segDesc = segs.map(([a, b]) => segText(a, b)).join('、');
+    meta.critical = critical;
     const live = { note: '正在实时抓取…', sources: allSources };
     meta.live = live;
     const draw = () => { if (seq === pushSeq) render(mergeItems(staticItems, liveItems), meta); };
     draw();
     timer = setInterval(() => { if (seq === pushSeq) updateLoadingStatus(meta); }, 1000);
 
+    // 先确认实时服务可达（手机在国内网络下通常不可达，避免傻等）
+    if (pingPromise) { try { await pingPromise; } catch (_) { /* 状态在 workerPing 里 */ } }
+    const unreachable = workerPing && workerPing.ok === false;
+
     const jobs = [];
     for (const [a, b] of segs) {
       for (const d of domains) {
         const url = `${WORKER_URL}/api/news?start=${a}&end=${b}&domains=${d}&limit=${LIVE_LIMIT}`;
+        const p = unreachable ? Promise.reject(Object.assign(new Error(`网络无法连接（${workerPing.error || 'ping 失败'}）`), { final: true })) : fetchWithTimeout(url, WORKER_TIMEOUT_MS);
         jobs.push(
-          fetchWithTimeout(url, WORKER_TIMEOUT_MS)
+          p
             .then((j) => {
               const items = (j.items || []).map(normLiveItem);
               liveItems.push(...items);
@@ -407,7 +483,7 @@ async function pushNews() {
               state[d].ok++;
             })
             .catch((e) => {
-              state[d].error = e && e.name === 'AbortError' ? `等待超过 ${WORKER_TIMEOUT_MS / 1000} 秒无响应` : /Failed to fetch|NetworkError|Load failed|network/i.test(String(e && e.message)) ? `网络无法连接（${e.message}）` : String((e && e.message) || e);
+              state[d].error = e && e.final ? e.message : e && e.name === 'AbortError' ? `等待超过 ${WORKER_TIMEOUT_MS / 1000} 秒无响应` : /Failed to fetch|NetworkError|Load failed|network/i.test(String(e && e.message)) ? `网络无法连接（${e.message}）` : String((e && e.message) || e);
             })
             .finally(() => {
               if (--state[d].pending === 0) state[d].state = state[d].ok ? 'done' : 'failed';
@@ -422,8 +498,11 @@ async function pushNews() {
     timer = null;
     const liveTotal = domains.reduce((n, d) => n + state[d].live, 0);
     const failed = domains.filter((d) => state[d].state === 'failed');
+    const upd = index && index.updated_at ? `，数据更新于 ${fmtUpdated(index.updated_at)}` : '';
     if (failed.length === domains.length) {
-      live.note = `实时抓取服务连接失败：${state[domains[0]].error || '未知错误'}${staticItems.length ? '；已显示 data/news.json 中的数据' : ''}`;
+      live.note = critical
+        ? `实时抓取服务连接失败：${state[domains[0]].error || '未知错误'}。该时段不在静态归档范围内，无法显示`
+        : `实时服务当前不可用（${state[domains[0]].error || '未知错误'}），已显示静态归档数据${upd}`;
     } else if (failed.length) {
       live.note = `已实时抓取补充 ${liveTotal} 条（${failed.map((d) => DOMAIN_META[d].title).join('、')} 请求失败）`;
     } else {
@@ -431,11 +510,10 @@ async function pushNews() {
     }
     live.elapsed = performance.now() - meta.t0;
     draw();
-    if (failed.length === domains.length) {
+    if (failed.length === domains.length && critical) {
       status.classList.add('error');
       status.textContent = live.note;
     }
-    if (failed.length === domains.length && !staticItems.length && staticErr) throw staticErr;
   } catch (err) {
     status.classList.add('error');
     status.textContent = err.message || String(err);
@@ -453,13 +531,16 @@ function applyDateLimits() {
 
 async function showCoverageHint() {
   try {
-    const data = await loadNews();
+    const data = await loadIndex();
     const cov = coverageOf(data);
     if (cov.start) {
-      $('#status').textContent = `数据覆盖 ${cov.start} ~ ${cov.end}` +
-        (data.updated_at ? ` · 更新于 ${fmtUpdated(data.updated_at)}` : '') + (WORKER_URL ? ' · 其余日期将实时抓取' : '') + ' · 选好时间后点「推送新闻」';
+      $('#status').textContent = `静态归档覆盖 ${cov.start} ~ ${cov.end}` +
+        (data.updated_at ? ` · 数据更新于 ${fmtUpdated(data.updated_at)}` : '') + ' · 选好时间后点「推送新闻」';
     }
-  } catch (_) { /* 静默：推送时会再报错 */ }
+  } catch (e) {
+    $('#status').classList.add('error');
+    $('#status').textContent = e.message;
+  }
 }
 
 function bind() {
@@ -484,11 +565,13 @@ function bind() {
     $('#pushBtn').disabled = false;
     $('#status').textContent = '已重置，点击「推送新闻」生成简报';
   });
-  showCoverageHint().then(pingWorker);
+  showCoverageHint();
+  pingPromise = pingWorker();
   checkVersion();
 }
 
 let workerPing = null; // { ok, ms, error }
+let pingPromise = null;
 
 async function pingWorker() {
   if (!WORKER_URL) return;
@@ -503,16 +586,16 @@ async function pingWorker() {
   el.textContent = '实时抓取服务：检测中…';
   const t0 = performance.now();
   try {
-    const j = await fetchWithTimeout(`${WORKER_URL}/api/ping?t=${Date.now()}`, 15000);
+    const j = await fetchWithTimeout(`${WORKER_URL}/api/ping?t=${Date.now()}`, PING_TIMEOUT_MS);
     const ms = Math.round(performance.now() - t0);
     workerPing = { ok: !!j.ok, ms };
     el.classList.add('ok');
-    el.textContent = `实时抓取服务：已连接（${ms} ms${j.colo ? ' · 节点 ' + j.colo : ''}），超出精选数据的日期将实时抓取`;
+    el.textContent = `实时抓取服务：已连接（${ms} ms${j.colo ? ' · 节点 ' + j.colo : ''}），最近几天及归档之外的日期将实时抓取`;
   } catch (e) {
-    const msg = e && e.name === 'AbortError' ? '15 秒内无响应' : String((e && e.message) || e);
+    const msg = e && e.name === 'AbortError' ? `${PING_TIMEOUT_MS / 1000} 秒内无响应` : String((e && e.message) || e);
     workerPing = { ok: false, error: msg };
     el.classList.add('bad');
-    el.textContent = `实时抓取服务连接失败：${msg}（当前网络可能无法访问 ${WORKER_URL.replace(/^https?:\/\//, '')}），仅能显示精选数据`;
+    el.textContent = `实时抓取服务不可达：${msg}（当前网络无法访问 ${WORKER_URL.replace(/^https?:\/\//, '')}）。将改用静态归档中的新闻（截至归档更新时间，最近几天可能缺失）`;
   }
 }
 

@@ -23,7 +23,7 @@ export const tmtpost = {
       start,
       end,
       maxProbes: 5,
-      maxRangePages: 3,
+      maxRangePages: Math.max(3, ctx.budget - 6),
       fetchPage: async (i) => {
         const url = `https://api.tmtpost.com/v1/categories/multi_content/list?category_guid=6916385&subtype=post&limit=${LIMIT}&offset=${i * LIMIT}&fields=summary`;
         const j = await fetchJson(ctx, url, { headers: TMT_HEADERS });
@@ -150,7 +150,7 @@ export const aibase = {
       if (hi < lo) break;
     }
     // evenly sample the id range with the remaining budget (each sample ~1.1 requests)
-    const k = Math.max(0, Math.min(10, Math.floor((ctx.remaining() - 1) / 1.15)));
+    const k = Math.max(0, Math.min(45, Math.floor((ctx.remaining() - 1) / 1.15)));
     const ids = new Set();
     for (let i = 0; i < k; i++) ids.add(Math.round(lo + ((i + 0.5) * (hi - lo)) / Math.max(1, k)));
     await Promise.allSettled([...ids].filter((id) => !found.has(id)).map((id) => probe(id)));
